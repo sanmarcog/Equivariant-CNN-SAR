@@ -35,19 +35,42 @@ Steerable CNNs (Weiler & Cesa, NeurIPS 2019) enforce equivariance by constructio
 
 All models: 4 convolutional blocks, ~391K parameters, matched across equivariant and baseline variants.
 
-**Field type progression (equivariant models):**
-- Input: trivial representation — 5 scalar channels (VH, VV, slope, sin(aspect), cos(aspect))
-- Hidden: regular representation — channels transform under the full group action; resolution 64→32→16→8
-- Classification head: GroupPooling → global average pool → linear logit (rotation-invariant)
-- Orientation head (visualization only): 1×1 equivariant conv → basespace action representation → [B, 2] vector that rotates with the input; not used in training loss
+**Forward pass:**
 
-**Groups:**
+```
+Input patch  [B, 5, 64, 64]
+trivial rep · 5 channels (VH, VV, slope, sin asp, cos asp)
+      │
+      ▼
+Block 1  regular rep · 64×64  ──  R2Conv + BN + ELU + MaxPool
+      │
+      ▼
+Block 2  regular rep · 32×32  ──  R2Conv + BN + ELU + MaxPool
+      │
+      ▼
+Block 3  regular rep · 16×16  ──  R2Conv + BN + ELU + MaxPool
+      │
+      ▼
+Block 4  regular rep · 8×8   ──  R2Conv + BN + ELU
+      │
+      ├─────────────────────────────────────┐
+      ▼                                     ▼
+HEAD 1 (classification)             HEAD 2 (orientation, viz only)
+GroupPooling → trivial rep          1×1 R2Conv → standard rep
+GlobalAvgPool [B, C]                SpatialAvgPool [B, 2]
+Linear → [B, 1]                     2D vector rotating with input
+sigmoid → debris probability        (equivariant, not in loss)
+```
 
-| Model | Group | Equivariant to |
-|---|---|---|
-| C8 | Cyclic C₈ | 8 discrete rotations (0°, 45°, …, 315°) |
-| SO(2) | Special orthogonal | All continuous rotations; band-limited fields, L=4 |
-| D4 | Dihedral D₄ | 4 rotations + 2 reflections |
+**Group choices and irreducible representations:**
+
+The three groups differ in how the regular representation decomposes into irreps, which determines what spatial frequency information each feature type can encode. C8 (cyclic, order 8) decomposes into 8 one-dimensional irreps indexed by angular frequency *k* = 0, …, 7; features at frequency *k* respond selectively to oriented structures at scale *k* within the 45° discrete grid. D4 (dihedral, order 8: 4 rotations + 4 reflections) has four 1D irreps (symmetric/antisymmetric under rotation and reflection) and one 2D irrep; the reflection symmetry is physically motivated by the approximate bilateral symmetry of avalanche runouts perpendicular to the fall line. SO(2) (continuous rotation group) has infinitely many irreps — one per integer angular frequency — truncated here at maximum frequency *L* = 4, giving 9-dimensional feature fields (frequencies −4, …, +4); this is theoretically the strongest symmetry but the truncation makes equivariance approximate for fine-scale oriented features above frequency 4.
+
+| Model | Group | Order | Irreps in regular rep | Notes |
+|---|---|---|---|---|
+| C8 | Cyclic C₈ | 8 | 8 × 1D (freq k=0…7) | Exact equivariance at 45° grid |
+| D4 | Dihedral D₄ | 8 | 4 × 1D + 1 × 2D | Reflections motivated by debris bilateral symmetry |
+| SO(2) | Special orthogonal | ∞ | Truncated at L=4; 9D fields | Strongest symmetry; approximate above freq 4 |
 
 ---
 
