@@ -168,3 +168,9 @@ NeurIPS 2020.
 *Understanding and Mitigating the Tradeoff Between Robustness and Accuracy.*
 ICML 2020.
 [https://arxiv.org/abs/2002.10716](https://arxiv.org/abs/2002.10716)
+
+---
+
+## Experiment Notes
+
+**O(2) equivariant model (this work, 2026).** O(2) (continuous orthogonal group, flipRot2dOnR2(N=-1, maximum_frequency=8)) was implemented and tested. OOMed at 10% and 50% data fractions on 10.57 GB GPUs (A40/RTX 3080 class). At 25% and 100% data, underperformed D4 at matched parameter count. Consistent with the SO(2) vs C8 finding that continuous approximate equivariance underperforms discrete exact equivariance. Discontinued; left as future work with larger GPU memory (≥24 GB).
