@@ -144,3 +144,27 @@ HAL: hal-02538046.
 *Better Aggregation in Test-Time Augmentation.*
 ICCV 2021.
 [https://openreview.net/pdf?id=Byxv9aioz](https://openreview.net/pdf?id=Byxv9aioz)
+
+---
+
+## Augmentation–Accuracy Tradeoff
+
+**Gontijo-Lopes, R., Smullin, S. J., Cubuk, E. D., & Dyer, E.** (2021).
+*Tradeoffs in Data Augmentation: An Empirical Study.*
+ICLR 2021.
+[https://openreview.net/forum?id=ZcKPWuhG6wy](https://openreview.net/forum?id=ZcKPWuhG6wy)
+
+**Chen, S., Dobriban, E., & Lee, J. H.** (2020).
+*A Group-Theoretic Framework for Data Augmentation.*
+NeurIPS 2020.
+[https://proceedings.neurips.cc/paper/2020/hash/f4573fc71c731d5c362f0d7860945b88-Abstract.html](https://proceedings.neurips.cc/paper/2020/hash/f4573fc71c731d5c362f0d7860945b88-Abstract.html)
+
+**Benton, G., Finzi, M., Izmailov, P., & Wilson, A. G.** (2020).
+*Learning Invariances in Neural Networks from Training Data.*
+NeurIPS 2020.
+[https://papers.nips.cc/paper/2020/hash/cc8090c4d2791cdd9cd2cb3c24296190-Abstract.html](https://papers.nips.cc/paper/2020/hash/cc8090c4d2791cdd9cd2cb3c24296190-Abstract.html)
+
+**Raghunathan, A., Xie, S. M., Yang, F., Duchi, J., & Liang, P.** (2020).
+*Understanding and Mitigating the Tradeoff Between Robustness and Accuracy.*
+ICML 2020.
+[https://arxiv.org/abs/2002.10716](https://arxiv.org/abs/2002.10716)

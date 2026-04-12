@@ -107,6 +107,10 @@ No prior work applies group-equivariant CNNs to SAR detection or segmentation.
 
 ## Findings and observations
 
+### Augmentation–accuracy tradeoff
+
+CNN+aug shows lower val AUC than plain CNN (0.693 vs 0.742 at 10% data), consistent with the augmentation-accuracy tradeoff documented in Gontijo-Lopes et al. (ICLR 2021) and Chen & Dobriban et al. (NeurIPS 2020). Full 360° rotation augmentation forces the model to discard orientation-dependent features that are genuinely discriminative on the in-distribution validation set — a known failure mode when the augmentation group is broader than the true invariance group of the task. Equivariant architectures avoid this tradeoff by construction: C8 achieves higher val AUC than CNN+aug (0.703 vs 0.693) without any distribution shift during training. OOD test results pending.
+
 ### Bilinear interpolation as accidental speckle reduction
 
 Rotation sensitivity analysis (`scripts/rotation_sensitivity.py`): 200 Tromsø test patches rotated at 8 angles, inference with C8 model.
