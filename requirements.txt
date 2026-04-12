@@ -1,0 +1,31 @@
+# Requirements for Equivariant CNNs for SAR Avalanche Debris Detection
+#
+# Base environment: NVIDIA PyTorch container pytorch_24.12-py3.sif
+#   (PyTorch 2.6.0 + CUDA 12.4, torchvision, numpy 2.2 provided by container)
+#
+# Install these on top of the container venv (see slurm/setup_venv.sh):
+#   pip install -r requirements.txt
+#
+# Note: numpy is pinned <2 to prevent ml packages from upgrading the
+# container's numpy 2.x, which would break lie-learn.
+
+# Equivariance
+autograd
+pymanopt
+py3nj
+lie-learn==0.0.2
+escnn
+e2cnn
+
+# ML / data stack
+numpy<2
+wandb
+scikit-learn
+matplotlib
+seaborn
+rasterio
+geopandas
+sentinelsat
+pandas
+tifffile
+scipy
