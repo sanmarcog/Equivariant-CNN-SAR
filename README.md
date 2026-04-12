@@ -25,7 +25,9 @@ Metric: AUC-ROC on Tromsø OOD test set. — = training in progress. F1/F2 after
 
 ## Mathematical background
 
-A network *f* is equivariant to group *G* if *f*(*g*·*x*) = *g*·*f*(*x*) for all *g* ∈ *G*. Steerable CNNs (Weiler & Cesa, NeurIPS 2019) enforce this exactly by constraining filters to *G*-steerable kernel spaces decomposed via group Fourier harmonics. Standard CNNs are translation-equivariant but achieve rotation invariance only approximately through augmentation; steerable CNNs extend exact equivariance to arbitrary subgroups of *E*(2). Implementation uses the [escnn](https://github.com/QUVA-Lab/escnn) library.
+The rotation group *G* acts on SAR image patches by rotating them: *g*·*x* is the patch *x* rotated by *g*. A function *f* is **equivariant** if *f*(*g*·*x*) = *g*·*f*(*x*) — the group acts on both the input and the output, and *f* commutes with both actions. The two output heads realise different cases of this: the classification head outputs a scalar debris probability, where the group acts trivially on the output (*f*(*g*·*x*) = *f*(*x*), i.e. rotation invariance as a special case); the orientation head outputs a 2D vector where *g* acts as a 2×2 rotation matrix, so the output vector rotates with the input.
+
+Steerable CNNs (Weiler & Cesa, NeurIPS 2019) enforce equivariance by construction via the **intertwiner constraint**: each convolutional filter must lie in the space of *G*-equivariant linear maps between the input and output field types — a constraint solved analytically by decomposing filters into a basis of group Fourier harmonics. This is not learned or approximated; it holds exactly for every input. Implementation uses the [escnn](https://github.com/QUVA-Lab/escnn) library.
 
 ---
 
