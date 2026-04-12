@@ -72,7 +72,7 @@ from data_pipeline.dataset import AvalancheDataset
 from models.cnn_baseline import CNNBaseline, count_parameters
 from models.cnn_augmented import AugmentedCNN
 from models.resnet_baseline import ResNetBaseline
-from models.equivariant_cnn import C8EquivariantCNN, SO2EquivariantCNN, D4EquivariantCNN
+from models.equivariant_cnn import C8EquivariantCNN, SO2EquivariantCNN, D4EquivariantCNN, O2EquivariantCNN, D4BiTemporalCNN
 
 
 logging.basicConfig(
@@ -82,7 +82,7 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-MODEL_NAMES = ("c8", "so2", "d4", "cnn", "aug", "resnet")
+MODEL_NAMES = ("c8", "so2", "d4", "o2", "d4_bitemporal", "cnn", "aug", "resnet")
 MIN_SAMPLES_PER_EVENT = 20   # minimum to compute per-event AUC
 
 
@@ -97,6 +97,10 @@ def build_model(name: str, in_channels: int = 5) -> nn.Module:
         return SO2EquivariantCNN(in_channels=in_channels)
     if name == "d4":
         return D4EquivariantCNN(in_channels=in_channels)
+    if name == "o2":
+        return O2EquivariantCNN(in_channels=in_channels)
+    if name == "d4_bitemporal":
+        return D4BiTemporalCNN(in_channels=in_channels)
     if name == "cnn":
         return CNNBaseline(in_channels=in_channels)
     if name == "aug":
@@ -106,7 +110,16 @@ def build_model(name: str, in_channels: int = 5) -> nn.Module:
     raise ValueError(f"Unknown model: {name}")
 
 
-def forward_logit(model: nn.Module, x: torch.Tensor) -> torch.Tensor:
+def forward_logit(model: nn.Module, x) -> torch.Tensor:
+    """Return scalar logit [B, 1]. x may be a tensor or (post, pre) tuple."""
+    base = model.module if isinstance(model, nn.DataParallel) else model
+    if getattr(base, "bitemporal", False):
+        x_post, x_pre = x
+        logit, _ = model(x_post, x_pre, return_orientation=False)
+        return logit
+    if hasattr(base, "orientation_conv"):
+        logit, _ = model(x, return_orientation=False)
+        return logit
     out = model(x)
     if isinstance(out, tuple):
         return out[0]
@@ -126,8 +139,12 @@ def run_inference(
     """Return (logits [N], labels [N]) as float64 numpy arrays."""
     model.eval()
     all_logits, all_labels = [], []
-    for x, y in loader:
-        x = x.to(device, non_blocking=True)
+    for batch in loader:
+        x, y = batch
+        if isinstance(x, (tuple, list)):
+            x = tuple(t.to(device, non_blocking=True) for t in x)
+        else:
+            x = x.to(device, non_blocking=True)
         logit = forward_logit(model, x).squeeze(1).cpu().numpy()
         all_logits.append(logit)
         all_labels.append(y.numpy())
@@ -413,7 +430,9 @@ def evaluate_run(args: argparse.Namespace) -> None:
             log.warning("CSV not found, skipping %s: %s", split_name, csv_path)
             continue
 
-        ds = AvalancheDataset(split_csv=csv_path, stats_path=args.stats_path)
+        is_bitemporal = (args.model == "d4_bitemporal")
+        stats = args.bitemporal_stats_path if is_bitemporal else args.stats_path
+        ds = AvalancheDataset(split_csv=csv_path, stats_path=stats, bitemporal=is_bitemporal)
         loader = DataLoader(
             ds,
             batch_size=args.batch_size,
@@ -554,6 +573,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--val-csv",    default="data/splits/val.csv")
     p.add_argument("--test-csv",   default="data/splits/test_ood.csv")
     p.add_argument("--stats-path", default="data/splits/norm_stats.json")
+    p.add_argument("--bitemporal-stats-path", default="data/splits/norm_stats_bitemporal.json",
+                   help="7-channel norm stats for d4_bitemporal.")
     p.add_argument("--checkpoint-dir", default="checkpoints")
     p.add_argument("--results-dir",    default="results")
     p.add_argument("--batch-size",  type=int, default=128)

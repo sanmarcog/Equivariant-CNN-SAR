@@ -1,11 +1,13 @@
 """
 models/equivariant_cnn.py
 
-Three G-equivariant CNNs for avalanche debris classification:
+Five G-equivariant CNNs for avalanche debris classification:
 
-    C8EquivariantCNN  — cyclic group of order 8   (rot2dOnR2(N=8))
-    SO2EquivariantCNN — continuous SO(2)           (rot2dOnR2(maximum_frequency=4))
-    D4EquivariantCNN  — dihedral group of order 8  (flipRot2dOnR2(N=4))
+    C8EquivariantCNN      — cyclic group of order 8   (rot2dOnR2(N=8))
+    SO2EquivariantCNN     — continuous SO(2)           (rot2dOnR2(maximum_frequency=4))
+    D4EquivariantCNN      — dihedral group of order 8  (flipRot2dOnR2(N=4))
+    O2EquivariantCNN      — continuous O(2)            (flipRot2dOnR2(N=-1, maximum_frequency=8))
+    D4BiTemporalCNN       — D4 with shared-weight bi-temporal encoder (pre + post SAR)
 
 Shared backbone architecture (4 equivariant conv blocks):
     Block 1 : R2Conv (trivial_in → regular), k=3, InnerBatchNorm, ELU
@@ -41,9 +43,13 @@ Parameter matching:
     For C8:  |G|=8,  regular repr dim=8  → n_regular channels in regular repr sense
     For D4:  |G|=8,  regular repr dim=8  → same
     For SO2: band-limited regular repr dim=2*L+1=9 (L=4) → slightly larger per copy
+    For O2:  band-limited regular repr dim=1+1+2*L=18 (L=8) → 18-dimensional per copy
 
-    Default n_regular=16 gives ~390k params for C8 and D4.
-    SO2 uses n_regular=14 to stay near the same count.
+    All four equivariant models target ~390K parameters by matching total effective
+    feature channels (n_regular × repr_dim) ≈ 468 across architectures:
+        C8/D4 n_regular=52, dim=8  → 52×8=416
+        SO2   n_regular=52, dim=9  → 52×9=468
+        O2    n_regular=26, dim=18 → 26×18=468
     Verify with count_parameters() before training.
 """
 
@@ -309,6 +315,177 @@ class D4EquivariantCNN(_EquivariantCNNBase):
 
 
 # ---------------------------------------------------------------------------
+# O(2) — continuous orthogonal group (rotations + reflections), band-limited to L=8
+# ---------------------------------------------------------------------------
+
+class O2EquivariantCNN(_EquivariantCNNBase):
+    """
+    O(2)-equivariant CNN: continuous rotations AND reflections, band-limited at L=8.
+
+    Design rationale — O(2) vs D4 as a controlled comparison:
+        D4 is the discrete dihedral group: exactly 4 rotations + 4 reflections.
+        O(2) is the continuous orthogonal group: all rotations + all reflections.
+        Both encode reflection symmetry (physically motivated by the approximate
+        bilateral symmetry of avalanche runouts perpendicular to the fall line).
+
+        maximum_frequency=8 matches the frequency content of C8, which decomposes
+        into 8 one-dimensional irreps at angular frequencies k=0,...,7. O(2) at L=8
+        covers the same angular frequency range while (a) making the rotational
+        symmetry continuous and (b) adding continuous reflection symmetry. This
+        makes O(2) vs D4 a controlled test of continuous vs discrete dihedral
+        symmetry at matched frequency content, independent of bandwidth effects.
+
+    Band-limited regular representation at L=8:
+        trivial (freq 0, det=+1): dim 1
+        sign   (freq 0, det=-1): dim 1
+        ρ_k for k=1,...,8: dim 2 each → 16
+        Total: 18
+
+    n_regular=26 keeps total effective feature channels (n_regular × dim) ≈ 468,
+    matching SO2 (n_regular=52, dim=9) and C8/D4 (n_regular=52, dim=8/8).
+
+    Uses NormNonLinearity + IIDBatchNorm2d (same as SO2) — required for continuous
+    groups where InnerBatchNorm and ELU do not guarantee equivariance.
+
+    Head 2 note — same reflection ambiguity as D4:
+        The basespace_action for O(2) maps reflections to (x,y) → (x,−y).
+        Interpret the 2D orientation output as an undirected axis, not a directed
+        vector. See visualize_d4_orientation() (applies equally here).
+    """
+
+    MAX_FREQUENCY = 8
+
+    def __init__(self, in_channels: int = 5, n_regular: int = 26) -> None:
+        super().__init__()
+        # N=-1: continuous rotations (SO(2) subgroup); maximum_frequency sets band limit.
+        # flipRot2dOnR2 adds reflection generators to make the full O(2) group.
+        self.gspace = gspaces.flipRot2dOnR2(N=-1, maximum_frequency=self.MAX_FREQUENCY)
+
+        # Pre-instantiate O(2) irreps up to 2*MAX_FREQUENCY.
+        # Clebsch-Gordan decompositions of tensor products of irreps at frequency ≤ L
+        # can produce irreps at frequencies up to 2L. escnn will raise
+        # InsufficientIrrepsException if these are not already instantiated when
+        # building the equivariant kernel basis.
+        #
+        # O(2) irrep parameterization in escnn: (j, k)
+        #   irrep(0, 0): trivial (1D, det=+1, rot=trivial)
+        #   irrep(1, 0): sign   (1D, det=-1, rot=trivial)
+        #   irrep(1, k) for k≥1: 2D irreps at rotational frequency k
+        #   irrep(0, k) for k≥1: INVALID — only one 2D irrep per frequency k≥1.
+        fg = self.gspace.fibergroup
+        fg.irrep(0, 0)   # trivial
+        for k in range(2 * self.MAX_FREQUENCY + 1):
+            fg.irrep(1, k)   # sign (k=0) and all 2D irreps (k≥1)
+
+        # Band-limited regular repr: trivial + sign + ρ_k (k=1..L), total dim=18 at L=8.
+        bl_repr = fg.bl_regular_representation(L=self.MAX_FREQUENCY)
+        self.feat_type_regular = enn.FieldType(
+            self.gspace, [bl_repr] * n_regular
+        )
+        self._build(
+            in_channels,
+            norm_cls=enn.IIDBatchNorm2d,
+            nonlin_fn=lambda ft: enn.NormNonLinearity(ft),
+            use_norm_pool=True,
+        )
+
+
+# ---------------------------------------------------------------------------
+# D4 bi-temporal — shared-weight encoder for pre + post SAR patches
+# ---------------------------------------------------------------------------
+
+class D4BiTemporalCNN(_EquivariantCNNBase):
+    """
+    D4-equivariant bi-temporal CNN for change detection.
+
+    A shared-weight D4-equivariant encoder is applied independently to both
+    the pre-event and post-event SAR patches. The feature difference
+    (post − pre) forms the change representation passed to the classification head.
+
+    Equivariance of the change signal:
+        Let f be the D4-equivariant encoder and g ∈ D4. Then:
+            f(g·x_post) − f(g·x_pre)
+          = g·f(x_post) − g·f(x_pre)   (D4-equivariance of f, applied twice)
+          = g·(f(x_post) − f(x_pre))   (linearity of the group action on feature vectors)
+        So the change feature is D4-equivariant under simultaneous rotation/reflection
+        of both patches — the correct symmetry for a scene observed from a fixed sensor
+        at an unknown orientation.
+
+    Inputs (two separate 5-channel tensors):
+        x_post: [B, 5, 64, 64]  (VH_post, VV_post, slope, sin_asp, cos_asp)
+        x_pre:  [B, 5, 64, 64]  (VH_pre,  VV_pre,  slope, sin_asp, cos_asp)
+
+    Outputs: (logit [B, 1], orientation [B, 2] | None)
+
+    Parameter count: identical to D4EquivariantCNN (~391K) because the encoder
+    weights are shared between the two branches — one set of weights, two forward passes.
+
+    Use AvalancheDataset(bitemporal=True) to obtain (post_5ch, pre_5ch) pairs.
+    """
+
+    bitemporal: bool = True   # flag read by train/evaluate to handle tuple batches
+
+    def __init__(self, in_channels: int = 5, n_regular: int = 52) -> None:
+        super().__init__()
+        self.gspace            = gspaces.flipRot2dOnR2(N=4)
+        self.feat_type_regular = enn.FieldType(
+            self.gspace, [self.gspace.regular_repr] * n_regular
+        )
+        self._build(in_channels)
+
+    def forward(
+        self,
+        x_post: torch.Tensor,
+        x_pre:  torch.Tensor,
+        return_orientation: bool = False,
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
+        """
+        Args:
+            x_post:             [B, 5, 64, 64] post-event patch
+            x_pre:              [B, 5, 64, 64] pre-event patch
+            return_orientation: If True, also compute the equivariant orientation head.
+
+        Returns:
+            logit:       [B, 1]        — for BCEWithLogitsLoss
+            orientation: [B, 2] | None
+        """
+        feat_in_type = self.block1.in_type
+
+        def _encode(x: torch.Tensor) -> enn.GeometricTensor:
+            """Run the shared backbone on one patch."""
+            g = enn.GeometricTensor(x, feat_in_type)
+            g = self.block1(g)
+            g = self.block2(g)
+            g = self.block3(g)
+            return self.block4(g)
+
+        feat_post = _encode(x_post)   # [B, feat_regular.size, 8, 8]
+        feat_pre  = _encode(x_pre)    # [B, feat_regular.size, 8, 8]
+
+        # Equivariant change feature: post − pre
+        # By linearity: g·(feat_post − feat_pre) = g·feat_post − g·feat_pre
+        change_tensor = feat_post.tensor - feat_pre.tensor
+        change_geo    = enn.GeometricTensor(change_tensor, self.feat_type_regular)
+
+        # Head 1 — classification
+        inv      = self.group_pool(change_geo)
+        inv      = self.spatial_pool_h1(inv)
+        inv_flat = inv.tensor.flatten(1)
+        logit    = self.classifier(inv_flat)
+
+        # Head 2 — orientation (change-flow direction)
+        if return_orientation:
+            ori    = self.orientation_conv(change_geo)
+            orient = torch.nn.functional.adaptive_avg_pool2d(
+                ori.tensor, (1, 1)
+            ).flatten(1)
+        else:
+            orient = None
+
+        return logit, orient
+
+
+# ---------------------------------------------------------------------------
 # D4 orientation visualization
 # ---------------------------------------------------------------------------
 
@@ -389,10 +566,19 @@ if __name__ == "__main__":
         (C8EquivariantCNN,  "C8"),
         (SO2EquivariantCNN, "SO(2)"),
         (D4EquivariantCNN,  "D4"),
+        (O2EquivariantCNN,  "O(2)"),
     ]:
         model = ModelClass(in_channels=5)
         model.eval()
         with torch.no_grad():
-            logit, orient = model(x)
+            logit, orient = model(x, return_orientation=True)
         params = count_parameters(model)
         print(f"{name:6s}  logit={tuple(logit.shape)}  orient={tuple(orient.shape)}  params={params:,}")
+
+    # Bi-temporal model takes (post, pre) pair
+    bt_model = D4BiTemporalCNN(in_channels=5)
+    bt_model.eval()
+    with torch.no_grad():
+        logit, orient = bt_model(x, x, return_orientation=True)
+    params = count_parameters(bt_model)
+    print(f"D4-BT  logit={tuple(logit.shape)}  orient={tuple(orient.shape)}  params={params:,}")

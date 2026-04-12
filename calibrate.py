@@ -63,7 +63,7 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-MODEL_NAMES = ("c8", "so2", "d4", "cnn", "aug", "resnet")
+MODEL_NAMES = ("c8", "so2", "d4", "o2", "d4_bitemporal", "cnn", "aug", "resnet")
 
 
 # ---------------------------------------------------------------------------

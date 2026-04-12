@@ -30,6 +30,12 @@ Goal 2 note (pre+post):
     VH_pre and VV_pre as channels 5 and 6, giving a [7, 64, 64] tensor.
     The normalization stats file will include pre-channel stats.
 
+Bi-temporal mode (for D4BiTemporalCNN):
+    Set bitemporal=True. __getitem__ returns ((post_5ch, pre_5ch), label)
+    where each patch is [5, 64, 64] with channels [VH, VV, slope, sin_asp, cos_asp].
+    Terrain channels are shared (same physical location). Use a separate 7-channel
+    norm_stats_bitemporal.json (computed automatically on first run).
+
 Usage:
     from data_pipeline.dataset import AvalancheDataset, get_sample_weights
 
@@ -200,7 +206,10 @@ class AvalancheDataset(Dataset):
         stats_path:     Path to norm_stats.json. If None, no normalization.
         compute_stats:  If True, compute and save stats to stats_path.
                         Only set this on the training dataset.
-        use_pre:        If True, include pre-event VH/VV channels (Goal 2).
+        use_pre:        If True, include pre-event VH/VV channels as channels 5–6.
+        bitemporal:     If True, return ((post_5ch, pre_5ch), label) per sample
+                        instead of (patch_7ch, label). Implies use_pre=True.
+                        Use with D4BiTemporalCNN.
     """
 
     def __init__(
@@ -209,10 +218,12 @@ class AvalancheDataset(Dataset):
         stats_path: str | Path | None = None,
         compute_stats: bool = False,
         use_pre: bool = False,
+        bitemporal: bool = False,
     ) -> None:
         self.split_csv  = Path(split_csv)
         self.stats_path = Path(stats_path) if stats_path else None
-        self.use_pre    = use_pre
+        self.bitemporal = bitemporal
+        self.use_pre    = use_pre or bitemporal  # bitemporal requires pre channels
 
         # Load manifest rows
         with open(self.split_csv, newline="") as f:
@@ -254,7 +265,7 @@ class AvalancheDataset(Dataset):
     def __len__(self) -> int:
         return len(self.records)
 
-    def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
+    def __getitem__(self, idx: int):
         record = self.records[idx]
         patch = _load_patch(
             record,
@@ -263,6 +274,17 @@ class AvalancheDataset(Dataset):
             stats=self.stats,
         )
         label = torch.tensor(self.labels[idx], dtype=torch.float32)
+
+        if self.bitemporal:
+            # patch is [7, H, W]: [VH_post, VV_post, slope, sin_asp, cos_asp, VH_pre, VV_pre]
+            # Split into two 5-channel inputs for the shared encoder:
+            #   post_5ch: [VH_post, VV_post, slope, sin_asp, cos_asp]  (channels 0-4)
+            #   pre_5ch:  [VH_pre,  VV_pre,  slope, sin_asp, cos_asp]  (channels 5,6 + 2,3,4)
+            # Terrain channels (slope, sin_asp, cos_asp) are shared — same physical location.
+            post_5ch = patch[0:5]                             # [5, H, W]
+            pre_5ch  = torch.cat([patch[5:7], patch[2:5]])   # [5, H, W]
+            return (post_5ch, pre_5ch), label
+
         return patch, label
 
     # ------------------------------------------------------------------
@@ -271,6 +293,8 @@ class AvalancheDataset(Dataset):
 
     @property
     def n_channels(self) -> int:
+        if self.bitemporal:
+            return 5   # per-branch input channels
         return 7 if self.use_pre else 5
 
     @property

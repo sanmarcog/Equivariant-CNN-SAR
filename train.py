@@ -65,7 +65,7 @@ from data_pipeline.dataset import AvalancheDataset, get_sample_weights
 from models.cnn_baseline import CNNBaseline, count_parameters
 from models.cnn_augmented import AugmentedCNN
 from models.resnet_baseline import ResNetBaseline
-from models.equivariant_cnn import C8EquivariantCNN, SO2EquivariantCNN, D4EquivariantCNN
+from models.equivariant_cnn import C8EquivariantCNN, SO2EquivariantCNN, D4EquivariantCNN, O2EquivariantCNN, D4BiTemporalCNN
 
 
 # ---------------------------------------------------------------------------
@@ -84,7 +84,7 @@ log = logging.getLogger(__name__)
 # Model factory
 # ---------------------------------------------------------------------------
 
-MODEL_NAMES = ("c8", "so2", "d4", "cnn", "aug", "resnet")
+MODEL_NAMES = ("c8", "so2", "d4", "o2", "d4_bitemporal", "cnn", "aug", "resnet")
 
 def build_model(name: str, in_channels: int = 5) -> nn.Module:
     if name == "c8":
@@ -93,6 +93,10 @@ def build_model(name: str, in_channels: int = 5) -> nn.Module:
         return SO2EquivariantCNN(in_channels=in_channels)
     if name == "d4":
         return D4EquivariantCNN(in_channels=in_channels)
+    if name == "o2":
+        return O2EquivariantCNN(in_channels=in_channels)
+    if name == "d4_bitemporal":
+        return D4BiTemporalCNN(in_channels=in_channels)
     if name == "cnn":
         return CNNBaseline(in_channels=in_channels)
     if name == "aug":
@@ -106,12 +110,20 @@ def build_model(name: str, in_channels: int = 5) -> nn.Module:
 # Forward pass — handles equivariant models (2-tuple output) and plain models
 # ---------------------------------------------------------------------------
 
-def forward_logit(model: nn.Module, x: torch.Tensor) -> torch.Tensor:
-    """Return scalar logit [B, 1] regardless of model type."""
+def forward_logit(model: nn.Module, x) -> torch.Tensor:
+    """Return scalar logit [B, 1] regardless of model type.
+
+    x may be a plain tensor [B, C, H, W] for single-image models, or a
+    (post_tensor, pre_tensor) tuple for bi-temporal models.
+    """
     base = model.module if isinstance(model, nn.DataParallel) else model
+    if getattr(base, "bitemporal", False):
+        # Bi-temporal model: x is (x_post, x_pre) tuple of tensors
+        x_post, x_pre = x
+        logit, _ = model(x_post, x_pre, return_orientation=False)
+        return logit
     if hasattr(base, "orientation_conv"):
-        # Equivariant model — explicitly skip orientation head (not in loss,
-        # running it during training wastes compute every batch)
+        # Equivariant model — skip orientation head during training
         logit, _ = model(x, return_orientation=False)
         return logit
     out = model(x)
@@ -184,17 +196,28 @@ def load_checkpoint(path: Path, model: nn.Module, optimizer, scheduler):
 # Evaluation
 # ---------------------------------------------------------------------------
 
+def _batch_to_device(batch, device, non_blocking: bool):
+    """Move a batch to device. Handles plain tensors and (post, pre) tuples."""
+    x, y = batch
+    if isinstance(x, (tuple, list)):
+        x = tuple(t.to(device, non_blocking=non_blocking) for t in x)
+    else:
+        x = x.to(device, non_blocking=non_blocking)
+    y = y.float().to(device, non_blocking=non_blocking)
+    return x, y
+
+
 @torch.no_grad()
 def evaluate(model: nn.Module, loader: DataLoader, device: torch.device) -> dict[str, float]:
     model.eval()
     all_logits, all_labels = [], []
 
     non_blocking = device.type == "cuda"
-    for x, y in loader:
-        x = x.to(device, non_blocking=non_blocking)
+    for batch in loader:
+        x, y = _batch_to_device(batch, device, non_blocking)
         logit = forward_logit(model, x).squeeze(1).cpu()
         all_logits.append(logit)
-        all_labels.append(y.float())
+        all_labels.append(y.float().cpu())
 
     logits = torch.cat(all_logits).numpy()
     labels = torch.cat(all_labels).numpy()
@@ -241,14 +264,19 @@ def train(args: argparse.Namespace) -> None:
 
     # --- Datasets ---
     log.info("Loading datasets …")
+    is_bitemporal = (args.model == "d4_bitemporal")
+    stats_path = args.bitemporal_stats_path if is_bitemporal else args.stats_path
+
     train_full = AvalancheDataset(
         split_csv=args.train_csv,
-        compute_stats=(not Path(args.stats_path).exists()),
-        stats_path=args.stats_path,
+        compute_stats=(not Path(stats_path).exists()),
+        stats_path=stats_path,
+        bitemporal=is_bitemporal,
     )
     val_ds = AvalancheDataset(
         split_csv=args.val_csv,
-        stats_path=args.stats_path,
+        stats_path=stats_path,
+        bitemporal=is_bitemporal,
     )
 
     train_ds = stratified_subset(train_full, args.data_fraction)
@@ -365,9 +393,8 @@ def train(args: argparse.Namespace) -> None:
         n_batches  = 0
 
         non_blocking = device.type == "cuda"
-        for x, y in train_loader:
-            x = x.to(device, non_blocking=non_blocking)
-            y = y.float().to(device, non_blocking=non_blocking)
+        for batch in train_loader:
+            x, y = _batch_to_device(batch, device, non_blocking)
 
             optimizer.zero_grad(set_to_none=True)
             logit = forward_logit(model, x).squeeze(1)
@@ -470,6 +497,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--train-csv",  default="data/splits/train.csv")
     p.add_argument("--val-csv",    default="data/splits/val.csv")
     p.add_argument("--stats-path", default="data/splits/norm_stats.json")
+    p.add_argument("--bitemporal-stats-path", default="data/splits/norm_stats_bitemporal.json",
+                   help="7-channel norm stats for d4_bitemporal (auto-computed if absent).")
     p.add_argument("--checkpoint-dir", default="checkpoints")
     p.add_argument("--num-workers", type=int, default=4)
     p.add_argument("--no-wandb", action="store_true",

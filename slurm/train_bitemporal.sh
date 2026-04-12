@@ -1,51 +1,38 @@
 #!/bin/bash
 # =============================================================================
-# slurm/train_array.sh
+# slurm/train_bitemporal.sh
 #
-# 28-job training array: 7 models × 4 data fractions.
-# Runs inside the NVIDIA PyTorch Apptainer container with a venv overlay for
-# packages not bundled in the container (escnn, wandb, rasterio, etc.).
+# 4-job training array: d4_bitemporal × 4 data fractions.
+# Runs inside the NVIDIA PyTorch Apptainer container with a venv overlay.
 #
-# Job layout (SLURM_ARRAY_TASK_ID 0–27):
-#   task_id = model_idx * 4 + fraction_idx
-#   model_idx    : 0=c8  1=so2  2=d4  3=o2  4=cnn  5=aug  6=resnet
+# Job layout (SLURM_ARRAY_TASK_ID 0–3):
+#   task_id = fraction_idx
 #   fraction_idx : 0=0.1  1=0.25  2=0.5  3=1.0
 #
-# Preemption safety:
-#   train.py saves a checkpoint after every epoch.
-#   If a job is preempted and re-queued, it resumes from the last checkpoint
-#   automatically — no extra flags needed.
+# Bi-temporal notes:
+#   - Uses a 7-channel norm stats file (auto-computed on first run if absent).
+#   - Norm stats path: ${PROJECT}/data/splits/norm_stats_bitemporal.json
+#   - Dataset returns (post_5ch, pre_5ch) pairs; matched to D4BiTemporalCNN.
 #
-# Prerequisites:
-#   1. Run slurm/setup_venv.sh once to create the venv.
-#   2. Confirm equivariance tests pass inside the container.
+# Submit all 4 jobs:
+#   sbatch slurm/train_bitemporal.sh
 #
-# Submit all 28 jobs:
-#   sbatch slurm/train_array.sh
-#
-# Submit a single job (e.g. c8 at 100% data, task 3):
-#   sbatch --array=3 slurm/train_array.sh
-#
-# Submit only o2 jobs (task IDs 12–15):
-#   sbatch --array=12-15 slurm/train_array.sh
-#
-# Monitor:
-#   squeue -u $USER
-#   tail -f /gscratch/scrubbed/sanmarco/equivariant-sar/logs/train_3.log
+# Submit a single job (e.g. 100% data, task 3):
+#   sbatch --array=3 slurm/train_bitemporal.sh
 # =============================================================================
 
-#SBATCH --job-name=sar-train
+#SBATCH --job-name=sar-bitemporal
 #SBATCH --account=demo
 #SBATCH --partition=ckpt
-#SBATCH --array=0-27
+#SBATCH --array=0-3
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --gres=gpu:2
 #SBATCH --mem=32G
 #SBATCH --time=4:00:00
-#SBATCH --output=/gscratch/scrubbed/sanmarco/equivariant-sar/logs/train_%a.log
-#SBATCH --error=/gscratch/scrubbed/sanmarco/equivariant-sar/logs/train_%a.log
+#SBATCH --output=/gscratch/scrubbed/sanmarco/equivariant-sar/logs/bitemporal_%a.log
+#SBATCH --error=/gscratch/scrubbed/sanmarco/equivariant-sar/logs/bitemporal_%a.log
 #SBATCH --requeue
 
 # ---------------------------------------------------------------------------
@@ -59,27 +46,19 @@ set -euo pipefail
 mkdir -p "${PROJECT}/logs" "${PROJECT}/checkpoints"
 
 # ---------------------------------------------------------------------------
-# Map task ID → model and data fraction
+# Map task ID → data fraction
 # ---------------------------------------------------------------------------
-MODELS=(c8 so2 d4 o2 cnn aug resnet)
 FRACTIONS=(0.1 0.25 0.5 1.0)
-
-MODEL_IDX=$(( SLURM_ARRAY_TASK_ID / 4 ))
-FRAC_IDX=$(( SLURM_ARRAY_TASK_ID % 4 ))
-
-MODEL="${MODELS[$MODEL_IDX]}"
-FRACTION="${FRACTIONS[$FRAC_IDX]}"
+FRACTION="${FRACTIONS[$SLURM_ARRAY_TASK_ID]}"
 
 echo "======================================================"
-echo "Task ${SLURM_ARRAY_TASK_ID}: model=${MODEL}  fraction=${FRACTION}"
+echo "Task ${SLURM_ARRAY_TASK_ID}: model=d4_bitemporal  fraction=${FRACTION}"
 echo "Node: $(hostname)  GPUs: ${CUDA_VISIBLE_DEVICES:-all}"
 echo "Container: ${SIF}"
 echo "======================================================"
 
 # ---------------------------------------------------------------------------
-# CUDA capability check — PyTorch 2.6 requires sm_70+ (Volta and newer).
-# P100 (sm_60) and older cards will silently fail or produce wrong results.
-# Requeue the job so SLURM retries on a compatible node.
+# CUDA capability check — PyTorch 2.6 requires sm_70+.
 # ---------------------------------------------------------------------------
 MIN_CC=70
 GPU_CC=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -1 | tr -d '.')
@@ -91,7 +70,7 @@ fi
 echo "GPU compute capability: ${GPU_CC} — OK"
 
 # ---------------------------------------------------------------------------
-# W&B — read key from file so it's available inside the container
+# W&B
 # ---------------------------------------------------------------------------
 export WANDB_API_KEY=$(cat ~/.wandb_api_key 2>/dev/null || echo "")
 if [[ -z "${WANDB_API_KEY}" ]]; then
@@ -111,7 +90,7 @@ source ${VENV}/bin/activate
 cd ${PROJECT}
 
 python train.py \
-    --model          ${MODEL} \
+    --model          d4_bitemporal \
     --data-fraction  ${FRACTION} \
     --epochs         100 \
     --batch-size     64 \
@@ -122,9 +101,10 @@ python train.py \
     --train-csv      ${PROJECT}/data/splits/train.csv \
     --val-csv        ${PROJECT}/data/splits/val.csv \
     --stats-path     ${PROJECT}/data/splits/norm_stats.json \
+    --bitemporal-stats-path ${PROJECT}/data/splits/norm_stats_bitemporal.json \
     --checkpoint-dir ${PROJECT}/checkpoints \
     --num-workers    8 \
     --wandb-project  equivariant-sar
 "
 
-echo "Task ${SLURM_ARRAY_TASK_ID} finished."
+echo "Task ${SLURM_ARRAY_TASK_ID} (d4_bitemporal frac=${FRACTION}) finished."
