@@ -1,6 +1,8 @@
 # Equivariant CNNs for SAR Avalanche Debris Detection
 
-Three group-equivariant CNN architectures (C8, SO(2), D4) implemented via [escnn](https://github.com/QUVA-Lab/escnn) are compared against matched-parameter CNN baselines for binary avalanche debris classification on Sentinel-1 patches. A bi-temporal D4 extension (D4-BT) fuses pre- and post-event SAR via shared-weight equivariant encoding and an equivariant change feature. Equivariance is enforced exactly by construction via steerable kernel bases derived from group representation theory, rather than approximated through data augmentation. Models are evaluated on the AvalCD dataset with Tromsø, Norway held out as a geographically unseen OOD test set.
+*Can group representation theory improve avalanche detection from satellite radar imagery?*
+
+Three group-equivariant CNN architectures (C8, SO(2), D4) implemented via [escnn](https://github.com/QUVA-Lab/escnn) are compared against matched-parameter CNN baselines for binary avalanche debris classification on Sentinel-1 patches. A bi-temporal D4 extension (D4-BT) fuses pre- and post-event SAR via shared-weight equivariant encoding and an equivariant change feature. Equivariance is enforced exactly by construction via steerable kernel bases derived from group representation theory, rather than approximated through data augmentation. Models are evaluated on the AvalCD dataset with Tromsø, Norway held out as a geographically unseen OOD test set. The bi-temporal D4 model achieves AUC=0.912 on a geographically unseen test set, detecting 115/117 reference avalanche polygons (98.3% recall).
 
 ---
 
@@ -93,7 +95,7 @@ Steerable CNNs (Weiler & Cesa, NeurIPS 2019) enforce equivariance by constructio
 
 ## Architecture
 
-All models: 4 convolutional blocks, ~391K parameters, matched across equivariant and baseline variants. D4-BT shares these same weights across two branches (pre- and post-event) — parameter count is identical to single-image D4.
+All models: 4 convolutional blocks, ~391K parameters, matched across equivariant and baseline variants. D4-BT uses the identical backbone with weights shared across two branches (pre- and post-event); the change feature inherits D4 equivariance by linearity of the group action. Parameter count is identical to single-image D4.
 
 ![Architecture diagram showing the equivariant CNN backbone with two output heads. Left: single-image path. Right: D4-BT bi-temporal extension with shared encoder, pre/post branches, and change feature. Equivariant blocks in purple, classification head in blue, orientation head in amber, bi-temporal addition in pink.](figures/fig6_architecture.png)
 
