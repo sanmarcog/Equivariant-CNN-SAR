@@ -62,7 +62,7 @@ except ImportError:
     _WANDB_AVAILABLE = False
 
 from data_pipeline.dataset import AvalancheDataset, get_sample_weights
-from models.cnn_baseline import CNNBaseline, count_parameters
+from models.cnn_baseline import CNNBaseline, CNNBiTemporal, count_parameters
 from models.cnn_augmented import AugmentedCNN
 from models.resnet_baseline import ResNetBaseline
 from models.equivariant_cnn import C8EquivariantCNN, SO2EquivariantCNN, D4EquivariantCNN, O2EquivariantCNN, D4BiTemporalCNN
@@ -84,7 +84,7 @@ log = logging.getLogger(__name__)
 # Model factory
 # ---------------------------------------------------------------------------
 
-MODEL_NAMES = ("c8", "so2", "d4", "o2", "d4_bitemporal", "cnn", "aug", "resnet")
+MODEL_NAMES = ("c8", "so2", "d4", "o2", "d4_bitemporal", "cnn_bitemporal", "cnn", "aug", "resnet")
 
 def build_model(name: str, in_channels: int = 5) -> nn.Module:
     if name == "c8":
@@ -97,6 +97,8 @@ def build_model(name: str, in_channels: int = 5) -> nn.Module:
         return O2EquivariantCNN(in_channels=in_channels)
     if name == "d4_bitemporal":
         return D4BiTemporalCNN(in_channels=in_channels)
+    if name == "cnn_bitemporal":
+        return CNNBiTemporal(in_channels=in_channels)
     if name == "cnn":
         return CNNBaseline(in_channels=in_channels)
     if name == "aug":
@@ -185,7 +187,7 @@ def save_checkpoint(
 
 
 def load_checkpoint(path: Path, model: nn.Module, optimizer, scheduler):
-    ckpt = torch.load(path, map_location="cpu", weights_only=False)
+    ckpt = torch.load(path, map_location="cpu", weights_only=True)
     model.load_state_dict(ckpt["model_state"])
     optimizer.load_state_dict(ckpt["optimizer_state"])
     scheduler.load_state_dict(ckpt["scheduler_state"])
@@ -264,7 +266,7 @@ def train(args: argparse.Namespace) -> None:
 
     # --- Datasets ---
     log.info("Loading datasets …")
-    is_bitemporal = (args.model == "d4_bitemporal")
+    is_bitemporal = args.model in ("d4_bitemporal", "cnn_bitemporal")
     stats_path = args.bitemporal_stats_path if is_bitemporal else args.stats_path
 
     train_full = AvalancheDataset(

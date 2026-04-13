@@ -2,7 +2,7 @@
 
 *Can group representation theory improve avalanche detection from satellite radar imagery?*
 
-Three group-equivariant CNN architectures (C8, SO(2), D4) implemented via [escnn](https://github.com/QUVA-Lab/escnn) are compared against matched-parameter CNN baselines for binary avalanche debris classification on Sentinel-1 patches. A bi-temporal D4 extension (D4-BT) fuses pre- and post-event SAR via shared-weight equivariant encoding and an equivariant change feature. Equivariance is enforced exactly by construction via steerable kernel bases derived from group representation theory, rather than approximated through data augmentation. Models are evaluated on the AvalCD dataset with Tromsø, Norway held out as a geographically unseen OOD test set. The bi-temporal D4 model achieves AUC=0.912 on a geographically unseen test set, detecting 116/117 reference avalanche polygons (99.1% recall).
+D4-equivariant bi-temporal CNNs detect 116/117 avalanche polygons (AUC=0.912) on a geographically unseen test set, matching the best single-image model's 100%-data performance with only 10% of the training data. Three group-equivariant CNN architectures (C8, SO(2), D4) implemented via [escnn](https://github.com/QUVA-Lab/escnn) are compared against matched-parameter CNN baselines for binary avalanche debris classification on Sentinel-1 patches. A bi-temporal D4 extension (D4-BT) fuses pre- and post-event SAR via shared-weight equivariant encoding and an equivariant change feature. Equivariance is enforced exactly by construction via steerable kernel bases derived from group representation theory, rather than approximated through data augmentation. Models are evaluated on the AvalCD dataset with Tromsø, Norway held out as a geographically unseen OOD test set.
 
 ---
 
@@ -15,23 +15,21 @@ OOD test set: Tromsø, Norway (never seen during training). Metric: AUC-ROC.
 | Model | 10% data | 25% data | 50% data | 100% data |
 |---|---|---|---|---|
 | **D4-BT (bi-temporal, pre+post)** | **0.871** | **0.906** | **0.912** | **0.894** |
+| CNN-BT (bi-temporal, no equiv.)† | — | — | — | — |
 | ResNet-18 (fine-tuned) | 0.555 | 0.786 | 0.743 | 0.803 |
 | D4 equivariant CNN | 0.717 | 0.789 | 0.778 | 0.769 |
 | CNN baseline (no aug) | 0.499 | 0.677 | 0.783 | 0.723 |
 | C8 equivariant CNN | 0.675 | 0.676 | 0.745 | 0.737 |
 | SO(2) equivariant CNN | 0.645 | 0.660 | 0.672 | 0.724 |
 | CNN + rotation augmentation | 0.523 | 0.622 | 0.744 | 0.705 |
-| O(2) equivariant CNN† | 0.595 | — | — | — |
+| O(2) equivariant CNN‡ | 0.595 | — | — | — |
 
-† O(2) was attempted but discontinued: OOM at 10% and 50% data fractions on 10.57 GB GPUs; underperformed D4 at 25% and 100% data. See [Findings](#findings-and-observations).
+† CNN-BT training in progress — results pending.  
+‡ O(2) was attempted but discontinued: OOM at 10% and 50% data fractions on 10.57 GB GPUs; underperformed D4 at 25% and 100% data. See [Findings](#findings-and-observations).
 
 ![Data-efficiency curves: AUC-ROC vs. training data fraction for all models on the Tromsø OOD test set. D4-BT (pink star, bold) is separated far above all single-image models at every fraction. D4 and ResNet-18 are the leading single-image models. CNN+aug consistently trails plain CNN, confirming the augmentation-accuracy tradeoff.](figures/fig1_data_efficiency.png)
 
 *AUC-ROC on the Tromsø OOD test set vs. training data fraction. D4-BT dominates across all fractions; equivariant single-image models (D4, C8) outperform CNN+aug at every fraction.*
-
-![Grouped bar chart comparing all models at each training data fraction. D4-BT (pink) leads at every fraction by a substantial margin. At 10% data D4-BT matches or exceeds the best single-image models at 100% data.](figures/fig2_model_comparison.png)
-
-*Model comparison at each data fraction. At 10% training data D4-BT already matches the best single-image model at 100% data (ResNet-18, 0.803).*
 
 ![Precision-recall curves for D4-BT (all 4 data fractions, pink) and the strongest single-image baselines (D4, ResNet-18, CNN) at 100% data on the Tromsø OOD test set. Dots mark the Youden-optimal operating point. Legend shows both AUC-ROC and AUC-PR. D4-BT 50% achieves AUC-PR=0.819, far above single-image baselines.](figures/fig9_pr_curves.png)
 
@@ -50,7 +48,9 @@ Full-scene sliding-window inference (64×64 patches, 50% overlap) was run over t
 
 **At threshold 0.75, the model detects 116/117 reference avalanche polygons (99.1% hit rate).** The one genuine miss is caused by an extreme radar geometry limitation, not a model failure (see Detection limits below).
 
-Our model localizes 116/117 annotated avalanche polygons (99.1%) at threshold 0.75, compared to 80.4% polygon recall reported by Gattimgatti et al. using a segmentation architecture on a slightly different annotation version (112 vs 117 polygons). Note that our hit-rate metric only requires high predicted probability within each polygon, not pixel-accurate boundary delineation — direct comparison requires a segmentation head, planned for Phase 2.
+#### Comparison caveats
+
+Our 99.1% hit rate and Gattimgatti et al.'s 80.4% polygon recall measure fundamentally different things and should not be compared directly. Our metric asks: *does the model assign any high probability within each reference polygon?* — a patch-classifier task that does not require pixel-accurate boundary delineation. Gattimgatti et al. report segmentation recall: the fraction of polygon area covered by predicted positive pixels, using a segmentation architecture on a slightly different annotation version (112 vs 117 polygons). The two numbers are not measuring the same capability. Direct comparison would require a segmentation head (planned for Phase 2).
 
 ![VV backscatter (grayscale) of the Tromsø test scene overlaid with D4-BT probability map (plasma colormap, threshold 0.30). White outlines mark the 117 reference avalanche polygons. High-probability blobs align tightly with GT polygons.](figures/fig3_heatmap_overlay.png)
 
@@ -153,7 +153,7 @@ The three groups differ in how the regular representation decomposes into irreps
 |---|---|---|---|---|
 | C8 | Cyclic C₈ | 8 | 8 × 1D (freq k=0…7) | Exact equivariance at 45° grid |
 | D4 | Dihedral D₄ | 8 | 4 × 1D + 1 × 2D | Reflections motivated by debris bilateral symmetry |
-| SO(2) | Special orthogonal | ∞ | Truncated at L=4; 9D fields | Strongest symmetry; approximate above freq 4 |
+| SO(2) | Special orthogonal | ∞ | Truncated at L=4; 9D fields | **Approximate** equivariance: exact only for frequencies ≤4; higher-freq features break it |
 
 ---
 
@@ -188,7 +188,7 @@ The three groups differ in how the regular representation decomposes into irreps
 | Gattimgatti et al., arXiv:2603.22658 (2026) | Bi-temporal change detection | F1=0.806, F2=0.841 on Tromsø | Same test region; different task (pre+post vs. post-only) |
 | Han et al. (ReDet), CVPR 2021 | Aerial object detection, optical | +1.2–3.5 mAP, −60% params vs. SOTA | Closest equivariant architecture; uses C4 via e2cnn on optical only |
 
-No prior work applies group-equivariant CNNs to SAR detection or segmentation.
+To our knowledge, no prior work applies group-equivariant CNNs to SAR detection or segmentation (based on a search of IEEE IGARSS, JSTARS, and arXiv 2018–2026).
 
 ---
 
@@ -216,7 +216,7 @@ SO(2) (continuous rotation group, truncated at maximum frequency L=4) underperfo
 
 ### 4. Logit saturation is a real deployment hazard
 
-D4-BT at 10/25/50% data converged with logit magnitudes far from 0 (temperature T≈50 after calibration), likely due to early stopping before logit scale regularisation fully kicks in. The model rank-orders well (high AUC) but raw probabilities are uninformative — everything is near 0 or 1 before calibration, and near 0.5 after. The F2-optimal threshold (0.862 for frac0p5) must be set from a held-out validation set, not assumed near 0.5.
+D4-BT at 10/25/50% data converged with logit magnitudes far from 0 (temperature T≈50 after calibration), likely due to early stopping before logit scale regularisation fully kicks in. The model rank-orders well (high AUC) but raw probabilities are uninformative — everything is near 0 or 1 before calibration. At T≈50, temperature scaling compresses logits by a factor of 50, which does not necessarily push calibrated probabilities to 0.5; the compressed distribution depends on the logit magnitudes in the validation set. The F2-optimal threshold (0.862 for frac0p5) is valid and set from the calibrated validation distribution — it must not be assumed near 0.5, but it is a genuine optimum on held-out data.
 
 ![Two-panel histogram showing probability distributions before (left) and after (right) temperature scaling, for D4 at 100% data (T≈4.6, purple) and D4-BT at 50% data (T≈50, pink). Before scaling, D4-BT probabilities are heavily saturated near 0 and 1. After T≈50 scaling, they collapse to a narrow band around 0.5, making raw probabilities unusable for deployment without val-set threshold calibration.](figures/fig12_temperature_scaling.png)
 
@@ -238,7 +238,7 @@ Rotation sensitivity analysis (`scripts/rotation_sensitivity.py`): 200 Tromsø t
 Bilinear interpolation at 45° acts as a spatial low-pass filter, partially reducing SAR speckle before inference. At axis-aligned angles no blending occurs. The +0.027 gap is uniform across all diagonal angles. Dalsasso et al. (EUSAR 2021) document the same mechanism as an artifact in despeckler training; here it surfaces as a classification benefit.
 
 **Implications:**
-- Explicit speckle filtering (Refined Lee, 5×5) before training/inference is expected to recover ~0.027 AUC across all models. Left as future work.
+- If the +0.027 AUC gap is driven entirely by speckle reduction, explicit speckle filtering (Refined Lee, 5×5) before training/inference would be expected to produce a similar gain across all models — but this is a hypothesis that requires explicit verification. Left as future work.
 - Bianchi et al. (2021) use 5×5 Refined Lee as standard preprocessing; our models do not. Direct F1 comparison should account for this gap.
 - Bianchi & Grahn (2025)'s rotation TTA may partly benefit from this interpolation-induced denoising, in addition to orientation coverage.
 
@@ -249,6 +249,16 @@ Bilinear interpolation at 45° acts as a spatial low-pass filter, partially redu
 ---
 
 **The overarching finding:** for a geographically diverse OOD test set, the right inductive bias — bi-temporal change signal combined with discrete group equivariance matched to the physical symmetry of the problem — matters far more than scale. D4-BT at 10% of the training data outperforms all single-image models at 100% of it.
+
+---
+
+## Limitations
+
+- **Single OOD scene.** The OOD test set consists of one Tromsø scene from one acquisition date. Performance on other unseen geographies, seasons, or SAR look angles has not been evaluated.
+- **European and Arctic training data only.** The AvalCD training regions (Livigno, Nuuk, Pish) do not cover the full diversity of avalanche terrain globally; generalisation to e.g. North American or Himalayan terrain is unverified.
+- **No plain CNN bi-temporal baseline yet.** `cnn_bitemporal` training jobs are submitted but results are not yet available. The comparison between D4-BT and a plain CNN with the same bi-temporal architecture is pending.
+- **Single training seed.** Each model/fraction combination was trained once; reported AUC values do not include confidence intervals or variance across seeds.
+- **Patch-level classifier limits fine-scale detection.** The 64×64 px patch stride means the model cannot precisely localise avalanche boundaries or reliably detect deposits smaller than one patch (~640 m²). The 29 m² sub-pixel polygon detected in this work is an extreme case.
 
 ---
 
@@ -286,8 +296,9 @@ Bilinear interpolation at 45° acts as a spatial low-pass filter, partially redu
 └── slurm/
     ├── setup_venv.sh               # One-time venv setup inside Apptainer container
     ├── smoke_test.sh               # Single-job smoke test
-    ├── train_array.sh              # 24-job array (6 models × 4 fractions)
+    ├── train_array.sh              # 28-job array (7 models × 4 fractions)
     ├── train_bitemporal.sh         # 4-job array (D4-BT × 4 fractions)
+    ├── train_cnn_bitemporal.sh     # 4-job array (CNN-BT × 4 fractions)
     ├── eval_all.sh                 # Evaluate + calibrate all completed runs
     └── eval_array.sh               # Per-run evaluation array
 ```

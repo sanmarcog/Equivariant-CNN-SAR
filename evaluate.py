@@ -69,7 +69,7 @@ except ImportError:
     _MATPLOTLIB = False
 
 from data_pipeline.dataset import AvalancheDataset
-from models.cnn_baseline import CNNBaseline, count_parameters
+from models.cnn_baseline import CNNBaseline, CNNBiTemporal, count_parameters
 from models.cnn_augmented import AugmentedCNN
 from models.resnet_baseline import ResNetBaseline
 from models.equivariant_cnn import C8EquivariantCNN, SO2EquivariantCNN, D4EquivariantCNN, O2EquivariantCNN, D4BiTemporalCNN
@@ -82,7 +82,7 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-MODEL_NAMES = ("c8", "so2", "d4", "o2", "d4_bitemporal", "cnn", "aug", "resnet")
+MODEL_NAMES = ("c8", "so2", "d4", "o2", "d4_bitemporal", "cnn_bitemporal", "cnn", "aug", "resnet")
 MIN_SAMPLES_PER_EVENT = 20   # minimum to compute per-event AUC
 
 
@@ -101,6 +101,8 @@ def build_model(name: str, in_channels: int = 5) -> nn.Module:
         return O2EquivariantCNN(in_channels=in_channels)
     if name == "d4_bitemporal":
         return D4BiTemporalCNN(in_channels=in_channels)
+    if name == "cnn_bitemporal":
+        return CNNBiTemporal(in_channels=in_channels)
     if name == "cnn":
         return CNNBaseline(in_channels=in_channels)
     if name == "aug":
@@ -410,7 +412,7 @@ def evaluate_run(args: argparse.Namespace) -> None:
 
     log.info("Building model: %s", args.model)
     model = build_model(args.model)
-    ckpt  = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+    ckpt  = torch.load(ckpt_path, map_location="cpu", weights_only=True)
     model.load_state_dict(ckpt["model_state"])
     model = model.to(device)
     model.eval()
@@ -430,7 +432,7 @@ def evaluate_run(args: argparse.Namespace) -> None:
             log.warning("CSV not found, skipping %s: %s", split_name, csv_path)
             continue
 
-        is_bitemporal = (args.model == "d4_bitemporal")
+        is_bitemporal = args.model in ("d4_bitemporal", "cnn_bitemporal")
         stats = args.bitemporal_stats_path if is_bitemporal else args.stats_path
         ds = AvalancheDataset(split_csv=csv_path, stats_path=stats, bitemporal=is_bitemporal)
         loader = DataLoader(

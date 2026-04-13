@@ -10,6 +10,12 @@ to re-run after partial completion.
 Usage (on Hyak login node — wraps each call in apptainer exec automatically):
     python scripts/run_eval_all.py
 
+Usage with explicit paths (useful on any cluster or locally):
+    python scripts/run_eval_all.py \\
+        --project-dir /path/to/equivariant-sar \\
+        --sif         /path/to/pytorch_24.12-py3.sif \\
+        --venv        /path/to/venv
+
 Usage (inside the Apptainer container, or locally without apptainer):
     python scripts/run_eval_all.py --no-apptainer
 
@@ -38,17 +44,13 @@ def _inside_container() -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Hyak paths — defaults for UW Hyak cluster; override via CLI flags locally
+# Default Hyak paths — overridden at runtime via --project-dir / --sif / --venv
 # ---------------------------------------------------------------------------
-PROJECT     = Path("/gscratch/scrubbed/sanmarco/equivariant-sar")
-SIF         = Path("/gscratch/scrubbed/sanmarco/pytorch_24.12-py3.sif")
-VENV        = Path("/gscratch/scrubbed/sanmarco/venv")
+_DEFAULT_PROJECT = Path("/gscratch/scrubbed/sanmarco/equivariant-sar")
+_DEFAULT_SIF     = Path("/gscratch/scrubbed/sanmarco/pytorch_24.12-py3.sif")
+_DEFAULT_VENV    = Path("/gscratch/scrubbed/sanmarco/venv")
 
-CKPT_DIR    = PROJECT / "checkpoints"
-RESULTS_DIR = PROJECT / "results"
-DATA_DIR    = PROJECT / "data"
-
-VALID_MODELS    = {"c8", "so2", "d4", "cnn", "aug", "resnet"}
+VALID_MODELS    = {"c8", "so2", "d4", "o2", "d4_bitemporal", "cnn_bitemporal", "cnn", "aug", "resnet"}
 FRACTION_MAP    = {"0p1": 0.1, "0p25": 0.25, "0p5": 0.5, "1p0": 1.0}
 
 
@@ -58,7 +60,7 @@ FRACTION_MAP    = {"0p1": 0.1, "0p25": 0.25, "0p5": 0.5, "1p0": 1.0}
 # ---------------------------------------------------------------------------
 
 def parse_run_name(name: str) -> tuple[str, float] | None:
-    m = re.fullmatch(r"([a-z0-9]+)_frac(\w+)", name)
+    m = re.fullmatch(r"([a-z0-9_]+)_frac(\w+)", name)
     if m is None:
         return None
     model    = m.group(1)
@@ -114,16 +116,16 @@ def is_calibrated(model: str, fraction: float, results_dir: Path) -> bool:
 # Build the shell command — optionally wrapped in apptainer exec
 # ---------------------------------------------------------------------------
 
-def make_cmd(python_args: str, use_apptainer: bool) -> str:
+def make_cmd(python_args: str, use_apptainer: bool, project: Path, sif: Path, venv: Path) -> str:
     if use_apptainer:
         inner = (
-            f"source {VENV}/bin/activate && "
-            f"cd {PROJECT} && "
+            f"source {venv}/bin/activate && "
+            f"cd {project} && "
             f"python {python_args}"
         )
         return (
             f"apptainer exec --nv --bind /gscratch "
-            f"{SIF} "
+            f"{sif} "
             f"/bin/bash -c '{inner}'"
         )
     # Already inside the container (or local run): use the same interpreter
@@ -218,10 +220,16 @@ def print_summary(rows: list[dict]) -> None:
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Evaluate all completed training runs.")
-    p.add_argument("--checkpoint-dir", default=str(CKPT_DIR),
-                   help="Root checkpoint directory to scan.")
-    p.add_argument("--results-dir", default=str(RESULTS_DIR),
-                   help="Root results directory.")
+    p.add_argument("--project-dir", default=str(_DEFAULT_PROJECT),
+                   help="Root project directory (contains checkpoints/, results/, data/).")
+    p.add_argument("--sif", default=str(_DEFAULT_SIF),
+                   help="Path to the Apptainer/Singularity .sif container image.")
+    p.add_argument("--venv", default=str(_DEFAULT_VENV),
+                   help="Path to the Python venv to activate inside the container.")
+    p.add_argument("--checkpoint-dir", default=None,
+                   help="Root checkpoint directory (default: <project-dir>/checkpoints).")
+    p.add_argument("--results-dir", default=None,
+                   help="Root results directory (default: <project-dir>/results).")
     p.add_argument("--no-apptainer", action="store_true",
                    help="Run python directly (no apptainer wrapper — for local use).")
     p.add_argument("--dry-run", action="store_true",
@@ -233,8 +241,12 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args        = parse_args()
-    ckpt_dir    = Path(args.checkpoint_dir)
-    results_dir = Path(args.results_dir)
+    project_dir = Path(args.project_dir)
+    sif         = Path(args.sif)
+    venv        = Path(args.venv)
+    data_dir    = project_dir / "data"
+    ckpt_dir    = Path(args.checkpoint_dir) if args.checkpoint_dir else project_dir / "checkpoints"
+    results_dir = Path(args.results_dir)    if args.results_dir    else project_dir / "results"
 
     if args.no_apptainer:
         apptainer = False
@@ -265,19 +277,24 @@ def main() -> None:
             print(f"\n[skip evaluate] {tag} — metrics.json already exists")
         else:
             print(f"\n[evaluate] {tag}")
+            bt_flag = (
+                f" --bitemporal-stats-path {data_dir}/splits/norm_stats_bitemporal.json"
+                if model in ("d4_bitemporal", "cnn_bitemporal") else ""
+            )
             eval_args = (
                 f"evaluate.py "
                 f"--model {model} "
                 f"--data-fraction {fraction} "
-                f"--val-csv      {DATA_DIR}/splits/val.csv "
-                f"--test-csv     {DATA_DIR}/splits/test_ood.csv "
-                f"--stats-path   {DATA_DIR}/splits/norm_stats.json "
+                f"--val-csv      {data_dir}/splits/val.csv "
+                f"--test-csv     {data_dir}/splits/test_ood.csv "
+                f"--stats-path   {data_dir}/splits/norm_stats.json"
+                f"{bt_flag} "
                 f"--checkpoint-dir {ckpt_dir} "
                 f"--results-dir    {results_dir} "
                 f"--batch-size   {args.batch_size} "
                 f"--num-workers  {args.num_workers}"
             )
-            rc = run(make_cmd(eval_args, apptainer), args.dry_run)
+            rc = run(make_cmd(eval_args, apptainer, project_dir, sif, venv), args.dry_run)
             if rc != 0:
                 print(f"  ERROR: evaluate.py failed for {tag} (exit {rc})")
                 errors.append(f"evaluate {tag}")
@@ -294,7 +311,7 @@ def main() -> None:
                 f"--data-fraction {fraction} "
                 f"--results-dir {results_dir}"
             )
-            rc = run(make_cmd(cal_args, apptainer), args.dry_run)
+            rc = run(make_cmd(cal_args, apptainer, project_dir, sif, venv), args.dry_run)
             if rc != 0:
                 print(f"  ERROR: calibrate.py failed for {tag} (exit {rc})")
                 errors.append(f"calibrate {tag}")

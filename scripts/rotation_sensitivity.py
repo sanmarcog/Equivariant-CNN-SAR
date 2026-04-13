@@ -115,7 +115,7 @@ def load_checkpoint(model_name: str, fraction: float, ckpt_dir: Path) -> nn.Modu
         print(f"  [skip] checkpoint not found: {ckpt_path}")
         return None
     model = build_model(model_name)
-    ckpt  = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+    ckpt  = torch.load(ckpt_path, map_location="cpu", weights_only=True)
     model.load_state_dict(ckpt["model_state"])
     model.eval()
     return model

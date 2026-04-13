@@ -6,26 +6,31 @@
 # Install these on top of the container venv (see slurm/setup_venv.sh):
 #   pip install -r requirements.txt
 #
-# Note: numpy is pinned <2 to prevent ml packages from upgrading the
-# container's numpy 2.x, which would break lie-learn.
+# Note: torch and torchvision are provided by the container; do not list them
+# here or pip will attempt to reinstall a CPU-only wheel.
+#
+# Note: numpy is pinned <2 because lie-learn (a dependency of escnn) is
+# incompatible with the numpy 2.x API changes. The container ships numpy 2.x;
+# this pin prevents pip from upgrading it and breaking lie-learn.
 
 # Equivariance
 autograd
 pymanopt
 py3nj
 lie-learn==0.0.2
-escnn
-e2cnn
+escnn>=0.1.9
 
 # ML / data stack
 numpy<2
-wandb
-scikit-learn
+wandb>=0.17
+scikit-learn>=1.3
 matplotlib
 seaborn
-rasterio
-geopandas
+rasterio>=1.3
+geopandas>=0.14
 sentinelsat
 pandas
 tifffile
 scipy
+tqdm
+requests

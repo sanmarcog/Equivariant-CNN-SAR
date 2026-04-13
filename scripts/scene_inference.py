@@ -441,7 +441,7 @@ def main() -> None:
     if not ckpt_path.exists():
         log.error("Checkpoint not found: %s", ckpt_path)
         sys.exit(1)
-    ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+    ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=True)
     model.load_state_dict(ckpt["model_state"])
     model.to(device)
     log.info("Loaded checkpoint: epoch %d  best_val_auc=%.4f",
