@@ -2,7 +2,7 @@
 
 *Can group representation theory improve avalanche detection from satellite radar imagery?*
 
-Three group-equivariant CNN architectures (C8, SO(2), D4) implemented via [escnn](https://github.com/QUVA-Lab/escnn) are compared against matched-parameter CNN baselines for binary avalanche debris classification on Sentinel-1 patches. A bi-temporal D4 extension (D4-BT) fuses pre- and post-event SAR via shared-weight equivariant encoding and an equivariant change feature. Equivariance is enforced exactly by construction via steerable kernel bases derived from group representation theory, rather than approximated through data augmentation. Models are evaluated on the AvalCD dataset with Tromsø, Norway held out as a geographically unseen OOD test set. The bi-temporal D4 model achieves AUC=0.912 on a geographically unseen test set, detecting 115/117 reference avalanche polygons (98.3% recall).
+Three group-equivariant CNN architectures (C8, SO(2), D4) implemented via [escnn](https://github.com/QUVA-Lab/escnn) are compared against matched-parameter CNN baselines for binary avalanche debris classification on Sentinel-1 patches. A bi-temporal D4 extension (D4-BT) fuses pre- and post-event SAR via shared-weight equivariant encoding and an equivariant change feature. Equivariance is enforced exactly by construction via steerable kernel bases derived from group representation theory, rather than approximated through data augmentation. Models are evaluated on the AvalCD dataset with Tromsø, Norway held out as a geographically unseen OOD test set. The bi-temporal D4 model achieves AUC=0.912 on a geographically unseen test set, detecting 116/117 reference avalanche polygons (99.1% recall).
 
 ---
 
@@ -39,24 +39,39 @@ OOD test set: Tromsø, Norway (never seen during training). Metric: AUC-ROC.
 
 ### Polygon-level evaluation (D4-BT, 50% data, Tromsø scene)
 
-Full-scene sliding-window inference (64×64 patches, 50% overlap) was run over the Tromsø test scene and evaluated against the 117 reference avalanche polygons from the AvalCD ground truth. Because D4-BT is a patch classifier (not a pixel-level segmentation model), IoU-based polygon matching (as used in Gattimgatti et al.) systematically underestimates performance: predicted blobs span multiple overlapping patches and are ~16× larger than the median GT polygon (median GT: 124 px; median predicted blob: 2,047 px). The appropriate metric is **polygon hit rate**: whether the model assigns a high probability anywhere within each reference polygon.
+Full-scene sliding-window inference (64×64 patches, 50% overlap) was run over the Tromsø test scene and evaluated against the 117 reference avalanche polygons from the AvalCD ground truth. Because D4-BT is a patch classifier (not a pixel-level segmentation model), IoU-based polygon matching (as used in Gattimgatti et al.) systematically underestimates performance: predicted blobs span multiple overlapping patches and are ~16× larger than the median GT polygon (median GT: 124 px; median predicted blob: 2,047 px). The appropriate metric is **polygon hit rate**: whether the model assigns a high probability anywhere within each reference polygon. Evaluation uses `all_touched=True` rasterization so sub-pixel polygons (area < 1 pixel) are correctly handled.
 
 | Threshold | Detected / 117 polygons | Hit rate |
 |---|---|---|
-| 0.50 | 115 / 117 | 98.3% |
-| 0.75 | 115 / 117 | 98.3% |
+| 0.50 | 116 / 117 | 99.1% |
+| 0.75 | 116 / 117 | 99.1% |
 | 0.85 | 110 / 117 | 94.0% |
 | 0.90 | 107 / 117 | 91.5% |
 
-**At threshold 0.75, the model detects 115/117 reference avalanche polygons (98.3% hit rate).** Direct IoU-based F1/F2 comparison with Gattimgatti et al. requires a segmentation architecture — this is planned for Phase 2.
+**At threshold 0.75, the model detects 116/117 reference avalanche polygons (99.1% hit rate).** The one genuine miss is caused by an extreme radar geometry limitation, not a model failure (see Detection limits below). Direct IoU-based F1/F2 comparison with Gattimgatti et al. requires a segmentation architecture — this is planned for Phase 2.
 
 ![VV backscatter (grayscale) of the Tromsø test scene overlaid with D4-BT probability map (plasma colormap, threshold 0.30). White outlines mark the 117 reference avalanche polygons. High-probability blobs align tightly with GT polygons.](figures/fig3_heatmap_overlay.png)
 
 *Full-scene probability heatmap for D4-BT (50% data) over Tromsø. VV backscatter is shown in grayscale; the plasma overlay shows avalanche probability ≥ 0.30. Reference polygon outlines are in white.*
 
-![Hit/miss map: detected polygons (green) and missed polygons (red) for D4-BT at threshold 0.75. 115/117 polygons are detected; 2 missed polygons are shown in the inset.](figures/fig4_hit_miss_map.png)
+![Hit/miss map at threshold 0.75. Green = detected (116), red = genuine miss (1, layover geometry), gold = sub-pixel polygon now correctly detected (was evaluation artefact). Annotated arrows explain each case. Inset shows the one genuine miss.](figures/fig4_hit_miss_map.png)
 
-*Hit/miss polygon map at threshold 0.75. Green = detected (115), red = missed (2). Missed polygons are highlighted in the inset.*
+*Hit/miss polygon map at threshold 0.75 (116/117 detected). The gold outline marks a 29 m² sub-pixel polygon that was previously missed due to an evaluator bug; the model scores it at 0.83. The single red polygon is a genuine miss caused by extreme radar foreshortening.*
+
+#### Detection limits
+
+Investigation of the two originally-reported misses reveals distinct failure modes:
+
+**Polygon #1 (GT index 113) — evaluation artefact, now fixed.** Area = 29 m², which is smaller than one SAR pixel (9 m × 9 m = 81 m²). The original evaluator used centre-point rasterization (`all_touched=False`), so no pixel centre fell inside the polygon and it was recorded as a miss with max_prob = 0. The model in fact scores the overlapping patch at **prob = 0.83** — well above threshold. Fixing the evaluator to use `all_touched=True` correctly counts this as detected. This polygon has the smallest area in the entire dataset.
+
+**Polygon #2 (GT index 115) — genuine miss, physically explainable.** Area = 612 m² (7.5 pixels), elevation 803 m, slope 42° west-facing. **Local Incidence Angle = 5°** (1st percentile of the scene; scene median 51°). At LIA = 5° the slope faces almost directly toward the radar line-of-sight, causing severe layover: multiple terrain elevations are compressed into the same pixel, producing specular backscatter completely unlike the distributed debris signature. The model observes:
+
+- VV = −2.3 dB (+5.3 dB above the scene debris median of −7.6 dB) — anomalously bright from specular return
+- VH = −14.6 dB (near-normal)
+- **VV/VH ratio = 12.3 dB** — nearly double the scene-typical ~6 dB; outside the training distribution
+- Change signal ΔVV = +1.6 dB (below scene debris median of +3.4 dB) — weak change despite avalanche
+
+This is a known physical limitation of SAR imagery that cannot be resolved at the patch-classifier level without LIA normalisation or multi-look processing. The affected slope is within a layover/foreshortening zone identifiable in the LIA raster.
 
 ### D4 BiTemporal — threshold analysis (F2-optimal, test_ood)
 

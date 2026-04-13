@@ -314,13 +314,14 @@ def fig4_hit_miss_map(scene_dir: Path, prob_map: Path, gt_path: Path,
     if gdf.crs != crs:
         gdf = gdf.to_crs(crs)
 
-    # Compute max prob within each GT polygon
+    # Compute max prob within each GT polygon (all_touched=True for sub-pixel polygons)
     max_probs = []
     for geom in gdf.geometry:
         try:
             with rasterio.open(prob_map) as src:
                 masked, _ = rasterio.mask.mask(src, [mapping(geom)],
-                                               crop=True, nodata=0.0)
+                                               crop=True, nodata=0.0,
+                                               all_touched=True)
             vals = masked[0].flatten()
             vals = vals[vals > 0]
             max_probs.append(float(vals.max()) if len(vals) > 0 else 0.0)
@@ -333,6 +334,11 @@ def fig4_hit_miss_map(scene_dir: Path, prob_map: Path, gt_path: Path,
     n_tp = gdf["detected"].sum()
     n_fn = (~gdf["detected"]).sum()
     missed = gdf[~gdf["detected"]].copy()
+
+    # Identify the two special-case polygons by their known GPKG area values
+    # (area=29 m²: sub-pixel eval artefact; area=612 m²: layover miss)
+    poly_subpx  = gdf[gdf["area"] == 29].copy()   if "area" in gdf.columns else None
+    poly_layover = gdf[gdf["area"] == 612].copy() if "area" in gdf.columns else None
 
     # Display bounds
     nodata = (vv < -30) | np.isnan(vv)
@@ -350,7 +356,7 @@ def fig4_hit_miss_map(scene_dir: Path, prob_map: Path, gt_path: Path,
     vv_disp[nodata] = np.nan
     vv_crop = vv_disp[r0:r1, c0:c1]
 
-    # Main axes + inset
+    # Main axes
     fig = plt.figure(figsize=(7, 8.5))
     ax  = fig.add_axes([0.02, 0.12, 0.96, 0.84])
 
@@ -365,52 +371,86 @@ def fig4_hit_miss_map(scene_dir: Path, prob_map: Path, gt_path: Path,
         missed.plot(ax=ax, facecolor="#FF1744", edgecolor="#FF1744",
                     linewidth=1.2, alpha=0.55)
 
+    # ── Annotate the two special-case polygons ────────────────────────────────
+    _ann_kw = dict(
+        fontsize=6.5,
+        color="white",
+        fontweight="bold",
+        bbox=dict(boxstyle="round,pad=0.25", fc="#1A1A1A", ec="white",
+                  alpha=0.80, lw=0.6),
+        arrowprops=dict(
+            arrowstyle="-|>",
+            color="white",
+            lw=1.0,
+            connectionstyle="arc3,rad=0.25",
+        ),
+        zorder=10,
+    )
+    # Sub-pixel polygon: highlight with gold outline; annotate as detected-but-notable
+    if poly_subpx is not None and len(poly_subpx):
+        poly_subpx.plot(ax=ax, facecolor="none", edgecolor="#FFD600",
+                        linewidth=2.0, alpha=0.9, zorder=8)
+        cx, cy = poly_subpx.geometry.iloc[0].centroid.x, poly_subpx.geometry.iloc[0].centroid.y
+        ax.annotate(
+            "Miss #1 (pre-fix): sub-pixel polygon\n29 m² — eval artefact, model prob=0.83",
+            xy=(cx, cy),
+            xytext=(cx + 3500, cy - 5000),
+            **_ann_kw,
+        )
+    # Layover polygon: shown red (genuinely missed); annotate
+    if poly_layover is not None and len(poly_layover):
+        cx, cy = poly_layover.geometry.iloc[0].centroid.x, poly_layover.geometry.iloc[0].centroid.y
+        ax.annotate(
+            "Miss #2: layover geometry\nLIA=5°, VV/VH=12.3 dB",
+            xy=(cx, cy),
+            xytext=(cx - 6000, cy + 4000),
+            **_ann_kw,
+        )
+
     # Legend patches
     hit_patch  = mpatches.Patch(facecolor="none", edgecolor="#76FF03",
                                  lw=1.2, label=f"Detected ({n_tp})")
     miss_patch = mpatches.Patch(facecolor="#FF1744", edgecolor="#FF1744",
                                  alpha=0.6, lw=1.2, label=f"Missed ({n_fn})")
-    ax.legend(handles=[hit_patch, miss_patch], loc="upper right",
-              framealpha=0.9, fontsize=8, edgecolor="0.7")
+    note_patch = mpatches.Patch(facecolor="none", edgecolor="#FFD600",
+                                 lw=1.5, label="Detected (was eval artefact)")
+    ax.legend(handles=[hit_patch, miss_patch, note_patch], loc="upper right",
+              framealpha=0.9, fontsize=7.5, edgecolor="0.7")
 
     ax.set_axis_off()
     ax.set_title(
         f"D4-BT polygon hit/miss map — threshold {threshold:.2f}\n"
-        f"Green: detected at threshold · Red: missed · "
-        f"{n_tp}/{n_tp+n_fn} polygons detected ({100*n_tp/(n_tp+n_fn):.1f}%)",
+        f"Green: detected · Red: missed · Gold: sub-pixel (eval artefact, detected after fix)\n"
+        f"{n_tp}/{n_tp+n_fn} polygons detected ({100*n_tp/(n_tp+n_fn):.1f}%) "
+        f"with all_touched=True masking",
         fontsize=8, pad=5,
     )
 
-    # Inset: zoom into missed polygons (if any exist)
-    if len(missed) > 0 and n_fn <= 5:
-        # Compute bounding box of missed polygons with padding
-        mb = missed.total_bounds   # minx, miny, maxx, maxy
-        pad_m = max((mb[2]-mb[0]), (mb[3]-mb[1])) * 1.5 + 500
+    # Inset: zoom into the genuine miss (layover polygon)
+    if poly_layover is not None and len(poly_layover):
+        mb = poly_layover.total_bounds
+        pad_m = 800
         x0, y0, x1, y1 = mb[0]-pad_m, mb[1]-pad_m, mb[2]+pad_m, mb[3]+pad_m
-
-        # Convert to pixel coords for crop
         pc0 = max(int((x0 - tf.c) / tf.a), 0)
         pc1 = min(int((x1 - tf.c) / tf.a), vv.shape[1])
         pr0 = max(int((y1 - tf.f) / tf.e), 0)
         pr1 = min(int((y0 - tf.f) / tf.e), vv.shape[0])
-
         if pr1 > pr0 and pc1 > pc0:
             vv_ins = np.clip(vv[pr0:pr1, pc0:pc1], -25, -5).astype(float)
             vv_ins[vv[pr0:pr1, pc0:pc1] < -30] = np.nan
             x0e = tf.c + pc0 * tf.a;  x1e = tf.c + pc1 * tf.a
             y1e = tf.f + pr0 * tf.e;  y0e = tf.f + pr1 * tf.e
-
             ax_ins = fig.add_axes([0.03, 0.03, 0.28, 0.18])
             ax_ins.imshow(vv_ins, extent=(x0e, x1e, y0e, y1e), origin="upper",
                           cmap="gray", vmin=-25, vmax=-5)
-            missed.plot(ax=ax_ins, facecolor="#FF1744", edgecolor="#FF1744",
-                        linewidth=1.0, alpha=0.6)
+            poly_layover.plot(ax=ax_ins, facecolor="#FF1744", edgecolor="#FF1744",
+                              linewidth=1.2, alpha=0.65)
             ax_ins.set_xlim(x0, x1);  ax_ins.set_ylim(y0, y1)
             ax_ins.set_axis_off()
-            ax_ins.set_title(f"Missed polygon{'s' if n_fn>1 else ''}",
-                              fontsize=7, pad=2)
+            ax_ins.set_title("Miss #2: layover\n(LIA=5°)", fontsize=6.5, pad=2,
+                             color="white")
             for sp in ax_ins.spines.values():
-                sp.set_visible(True);  sp.set_linewidth(0.8);  sp.set_color("white")
+                sp.set_visible(True); sp.set_linewidth(0.8); sp.set_color("white")
 
     p = out_dir / "fig4_hit_miss_map.png"
     fig.savefig(p, facecolor="black")

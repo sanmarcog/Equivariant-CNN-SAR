@@ -361,7 +361,8 @@ def hitrate_eval(
         try:
             with rasterio.open(prob_path) as src:
                 masked, _ = rasterio.mask.mask(
-                    src, [mapping(geom)], crop=True, nodata=0.0
+                    src, [mapping(geom)], crop=True, nodata=0.0,
+                    all_touched=True,  # sub-pixel polygons: include any touched pixel
                 )
             vals = masked[0].flatten()
             vals = vals[vals > 0]
