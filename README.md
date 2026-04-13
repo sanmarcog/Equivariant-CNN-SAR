@@ -23,6 +23,10 @@ OOD test set: Tromsø, Norway (never seen during training). Metric: AUC-ROC.
 
 † O(2) was attempted but discontinued: OOM at 10% and 50% data fractions on 10.57 GB GPUs; underperformed D4 at 25% and 100% data. See [Findings](#findings-and-observations).
 
+![Data-efficiency curves: AUC-ROC vs. training data fraction for all models on the Tromsø OOD test set. D4-BT (pink star, bold) is separated far above all single-image models at every fraction. D4 and ResNet-18 are the leading single-image models. CNN+aug consistently trails plain CNN, confirming the augmentation-accuracy tradeoff.](figures/data_efficiency_auc.png)
+
+*AUC-ROC on the Tromsø OOD test set vs. training data fraction. D4-BT dominates across all fractions; equivariant single-image models (D4, C8) outperform CNN+aug at every fraction.*
+
 ### Polygon-level evaluation (D4-BT, 50% data, Tromsø scene)
 
 Full-scene sliding-window inference (64×64 patches, 50% overlap) was run over the Tromsø test scene and evaluated against the 117 reference avalanche polygons from the AvalCD ground truth. Because D4-BT is a patch classifier (not a pixel-level segmentation model), IoU-based polygon matching (as used in Gattimgatti et al.) systematically underestimates performance: predicted blobs span multiple overlapping patches and are ~16× larger than the median GT polygon (median GT: 124 px; median predicted blob: 2,047 px). The appropriate metric is **polygon hit rate**: whether the model assigns a high probability anywhere within each reference polygon.

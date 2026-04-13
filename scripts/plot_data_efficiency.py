@@ -33,12 +33,13 @@ FRAC_LABELS = ["10%", "25%", "50%", "100%"]
 
 # Display order and labels
 MODEL_META = {
-    "c8":     {"label": "C8 equivariant",      "color": "#2196F3", "marker": "o", "ls": "-"},
-    "so2":    {"label": "SO(2) equivariant",    "color": "#4CAF50", "marker": "s", "ls": "-"},
+    "d4_bitemporal": {"label": "D4-BT (bi-temporal)", "color": "#E91E63", "marker": "*", "ls": "-",  "lw": 2.5},
     "d4":     {"label": "D4 equivariant",       "color": "#9C27B0", "marker": "^", "ls": "-"},
+    "c8":     {"label": "C8 equivariant",       "color": "#2196F3", "marker": "o", "ls": "-"},
+    "so2":    {"label": "SO(2) equivariant",    "color": "#4CAF50", "marker": "s", "ls": "-"},
+    "resnet": {"label": "ResNet-18",            "color": "#607D8B", "marker": "P", "ls": "-."},
     "cnn":    {"label": "CNN baseline",         "color": "#F44336", "marker": "D", "ls": "--"},
     "aug":    {"label": "CNN + aug",            "color": "#FF9800", "marker": "v", "ls": "--"},
-    "resnet": {"label": "ResNet-18",            "color": "#607D8B", "marker": "P", "ls": "-."},
 }
 
 METRIC_KEYS = {
@@ -154,11 +155,12 @@ def plot_data_efficiency(
             x, vals,
             color=meta["color"],
             linestyle=meta["ls"],
-            linewidth=1.8,
+            linewidth=meta.get("lw", 1.8),
             marker=meta["marker"],
-            markersize=7,
+            markersize=8 if meta.get("lw", 1.8) > 2 else 7,
             label=meta["label"],
             clip_on=False,
+            zorder=5 if meta.get("lw", 1.8) > 2 else 3,
         )
         any_plotted = True
 
@@ -210,7 +212,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args        = parse_args()
     results_dir = Path(args.results_dir)
-    out_path    = Path(args.out) if args.out else results_dir / "data_efficiency.png"
+    out_path    = Path(args.out) if args.out else results_dir / "figures" / "data_efficiency_auc.png"
     metric      = args.metric
     _, metric_label = METRIC_KEYS[metric]
 
