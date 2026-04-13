@@ -23,9 +23,13 @@ OOD test set: Tromsø, Norway (never seen during training). Metric: AUC-ROC.
 
 † O(2) was attempted but discontinued: OOM at 10% and 50% data fractions on 10.57 GB GPUs; underperformed D4 at 25% and 100% data. See [Findings](#findings-and-observations).
 
-![Data-efficiency curves: AUC-ROC vs. training data fraction for all models on the Tromsø OOD test set. D4-BT (pink star, bold) is separated far above all single-image models at every fraction. D4 and ResNet-18 are the leading single-image models. CNN+aug consistently trails plain CNN, confirming the augmentation-accuracy tradeoff.](figures/data_efficiency_auc.png)
+![Data-efficiency curves: AUC-ROC vs. training data fraction for all models on the Tromsø OOD test set. D4-BT (pink star, bold) is separated far above all single-image models at every fraction. D4 and ResNet-18 are the leading single-image models. CNN+aug consistently trails plain CNN, confirming the augmentation-accuracy tradeoff.](figures/fig1_data_efficiency.png)
 
 *AUC-ROC on the Tromsø OOD test set vs. training data fraction. D4-BT dominates across all fractions; equivariant single-image models (D4, C8) outperform CNN+aug at every fraction.*
+
+![Grouped bar chart comparing all models at each training data fraction. D4-BT (pink) leads at every fraction by a substantial margin. At 10% data D4-BT matches or exceeds the best single-image models at 100% data.](figures/fig2_model_comparison.png)
+
+*Model comparison at each data fraction. At 10% training data D4-BT already matches the best single-image model at 100% data (ResNet-18, 0.803).*
 
 ### Polygon-level evaluation (D4-BT, 50% data, Tromsø scene)
 
@@ -39,6 +43,14 @@ Full-scene sliding-window inference (64×64 patches, 50% overlap) was run over t
 | 0.90 | 107 / 117 | 91.5% |
 
 **At threshold 0.75, the model detects 115/117 reference avalanche polygons (98.3% hit rate).** Direct IoU-based F1/F2 comparison with Gattimgatti et al. requires a segmentation architecture — this is planned for Phase 2.
+
+![VV backscatter (grayscale) of the Tromsø test scene overlaid with D4-BT probability map (plasma colormap, threshold 0.30). White outlines mark the 117 reference avalanche polygons. High-probability blobs align tightly with GT polygons.](figures/fig3_heatmap_overlay.png)
+
+*Full-scene probability heatmap for D4-BT (50% data) over Tromsø. VV backscatter is shown in grayscale; the plasma overlay shows avalanche probability ≥ 0.30. Reference polygon outlines are in white.*
+
+![Hit/miss map: detected polygons (green) and missed polygons (red) for D4-BT at threshold 0.75. 115/117 polygons are detected; 2 missed polygons are shown in the inset.](figures/fig4_hit_miss_map.png)
+
+*Hit/miss polygon map at threshold 0.75. Green = detected (115), red = missed (2). Missed polygons are highlighted in the inset.*
 
 ### D4 BiTemporal — threshold analysis (F2-optimal, test_ood)
 
@@ -59,6 +71,10 @@ F2 is the primary metric (β=2): recall weighted 4× over precision, appropriate
 
 The rotation group *G* acts on SAR image patches by rotating them: *g*·*x* is the patch *x* rotated by *g*. A function *f* is **equivariant** if *f*(*g*·*x*) = *g*·*f*(*x*) — the group acts on both the input and the output, and *f* commutes with both actions. The two output heads realise different cases of this: the classification head outputs a scalar debris probability, where the group acts trivially on the output (*f*(*g*·*x*) = *f*(*x*), i.e. rotation invariance as a special case); the orientation head outputs a 2D vector where *g* acts as a 2×2 rotation matrix, so the output vector rotates with the input.
 
+![Group symmetry actions on a SAR avalanche debris patch. Left: C8 — 8 discrete rotations at 45° intervals. Right: D4 — 4 rotations (top row) and 4 reflections (bottom row). The same physical debris appears under every transformation; equivariant filters respond identically to all of them.](figures/fig7_group_elements.png)
+
+*C8 and D4 group actions on a real SAR avalanche debris patch. Equivariant architectures process all orientations identically by construction.*
+
 Steerable CNNs (Weiler & Cesa, NeurIPS 2019) enforce equivariance by construction via the **intertwiner constraint**: each convolutional filter must lie in the space of *G*-equivariant linear maps between the input and output field types — a constraint solved analytically by decomposing filters into a basis of group Fourier harmonics. This is not learned or approximated; it holds exactly for every input. Implementation uses the [escnn](https://github.com/QUVA-Lab/escnn) library.
 
 ---
@@ -66,6 +82,10 @@ Steerable CNNs (Weiler & Cesa, NeurIPS 2019) enforce equivariance by constructio
 ## Architecture
 
 All models: 4 convolutional blocks, ~391K parameters, matched across equivariant and baseline variants. D4-BT shares these same weights across two branches (pre- and post-event) — parameter count is identical to single-image D4.
+
+![Architecture diagram showing the equivariant CNN backbone with two output heads. Left: single-image path. Right: D4-BT bi-temporal extension with shared encoder, pre/post branches, and change feature. Equivariant blocks in purple, classification head in blue, orientation head in amber, bi-temporal addition in pink.](figures/fig6_architecture.png)
+
+*Equivariant CNN architecture (C8/D4/SO(2)/D4-BT). Steerable convolution blocks (purple) feed two heads: a classification head (blue) and an equivariant orientation head for visualisation (amber). D4-BT (pink) adds a shared pre-event branch whose change feature inherits D4 equivariance by linearity.*
 
 **Forward pass:**
 
@@ -117,6 +137,10 @@ The three groups differ in how the regular representation decomposes into irreps
 | Pish, Tajikistan | 1 | Train |
 | Tromsø, Norway | 1 | **OOD test** |
 
+![Geography of the AvalCD dataset. Four regions are marked on a world map: Livigno (Italy), Nuuk (Greenland), Pish (Tajikistan) as training regions (blue circles) and Tromsø (Norway) as the OOD test region (red star).](figures/fig5_geography.png)
+
+*AvalCD dataset geography. Training regions (blue) span three continents; Tromsø (red star) is the held-out OOD test set.*
+
 - **Split:** 27,206 train / 6,450 val / 2,211 test — 64×64 px, 10 m resolution
 - **Class balance:** ~1:8 (debris:clean); handled with `WeightedRandomSampler` + `BCEWithLogitsLoss(pos_weight=3.0)`
 - **Input:** [VH_post, VV_post, slope, sin(aspect), cos(aspect)]; SAR clipped to [−25, −5] dB; aspect sin/cos-encoded; DEM from Copernicus GLO-30
@@ -165,6 +189,10 @@ Rotation sensitivity analysis (`scripts/rotation_sensitivity.py`): 200 Tromsø t
 |---|---|
 | 0°, 90°, 180°, 270° | 0.7490 |
 | 45°, 135°, 225°, 315° | 0.7756 |
+
+![Speckle reduction via bilinear interpolation. Left: original 0° patch. Centre: same patch rotated 45° then back (bilinear interpolation smooths speckle). Right: absolute difference — the smoothed speckle pattern. AUC improves from 0.749 → 0.776 at diagonal angles.](figures/fig8_speckle_reduction.png)
+
+*Bilinear interpolation at 45° partially smooths SAR speckle. The difference panel shows the removed high-frequency speckle pattern.*
 
 Bilinear interpolation at 45° acts as a spatial low-pass filter, partially reducing SAR speckle before inference. At axis-aligned angles no blending occurs. The +0.027 gap is uniform across all diagonal angles. Dalsasso et al. (EUSAR 2021) document the same mechanism as an artifact in despeckler training; here it surfaces as a classification benefit.
 
