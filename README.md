@@ -31,6 +31,10 @@ OOD test set: Tromsø, Norway (never seen during training). Metric: AUC-ROC.
 
 *Model comparison at each data fraction. At 10% training data D4-BT already matches the best single-image model at 100% data (ResNet-18, 0.803).*
 
+![Precision-recall curves for D4-BT (all 4 data fractions, pink) and the strongest single-image baselines (D4, ResNet-18, CNN) at 100% data on the Tromsø OOD test set. Dots mark the Youden-optimal operating point. Legend shows both AUC-ROC and AUC-PR. D4-BT 50% achieves AUC-PR=0.819, far above single-image baselines.](figures/fig9_pr_curves.png)
+
+*Precision-recall curves on the Tromsø OOD test set. D4-BT at 50% data (AUC-PR=0.819) substantially outperforms all single-image models at 100% data. Dots = Youden-optimal operating points.*
+
 ### Polygon-level evaluation (D4-BT, 50% data, Tromsø scene)
 
 Full-scene sliding-window inference (64×64 patches, 50% overlap) was run over the Tromsø test scene and evaluated against the 117 reference avalanche polygons from the AvalCD ground truth. Because D4-BT is a patch classifier (not a pixel-level segmentation model), IoU-based polygon matching (as used in Gattimgatti et al.) systematically underestimates performance: predicted blobs span multiple overlapping patches and are ~16× larger than the median GT polygon (median GT: 124 px; median predicted blob: 2,047 px). The appropriate metric is **polygon hit rate**: whether the model assigns a high probability anywhere within each reference polygon.
@@ -64,6 +68,14 @@ F2 is the primary metric (β=2): recall weighted 4× over precision, appropriate
 | 100% | 0.894 | 0.677 | 0.738 | 0.597 | 1.15 |
 
 ¹ T≈50: logits saturated — model is well-ranked (high AUC) but logit magnitudes are unreliable. Threshold must be set from validation scores, not assumed near 0.5. frac1p0 converged with calibrated probabilities (T=1.15).
+
+![F1 and F2 vs. classification threshold for D4-BT (50% data) on the Tromsø OOD test set. The F2-optimal threshold (0.862) is marked with a dash-dot line; the default 0.5 and Youden's J threshold are also marked. Optimising the threshold yields +0.065 F2 over the default 0.5.](figures/fig10_threshold_sensitivity.png)
+
+*F1/F2 vs. threshold for D4-BT at 50% data. Setting threshold to 0.862 (F2-optimal) gains +0.065 F2 over the default 0.5 — critical for a recall-weighted metric.*
+
+![Confusion matrix for D4-BT (50% data) at the F2-optimal threshold (0.862) on the Tromsø OOD test set. Rows = actual class, columns = predicted class. Counts and row-normalised percentages shown.](figures/fig11_confusion_matrix.png)
+
+*Confusion matrix at F2-optimal threshold (0.862). The model misses few avalanche patches (low FN) at the cost of some false positives — appropriate for a hazard detection application.*
 
 ---
 
@@ -171,11 +183,19 @@ D4 equivariance applies to the change feature by linearity: if the shared encode
 
 **Threshold calibration note:** D4-BT at 10/25/50% data converged with logit magnitudes far from 0 (temperature T≈50 after calibration), likely due to early stopping before logit scale regularisation fully kicks in. The model rank-orders well (high AUC) but probabilities are unreliable without calibration. For deployment, thresholds must be set from held-out validation scores; the F2-optimal threshold lies between 0.78 and 0.88 for these fracs.
 
+![Two-panel histogram showing probability distributions before (left) and after (right) temperature scaling, for D4 at 100% data (T≈4.6, purple) and D4-BT at 50% data (T≈50, pink). Before scaling, D4-BT probabilities are heavily saturated near 0 and 1. After T≈50 scaling, they collapse to a narrow band around 0.5, making raw probabilities unusable for deployment without val-set threshold calibration.](figures/fig12_temperature_scaling.png)
+
+*Temperature scaling for a well-calibrated model (D4, T≈4.6) versus a logit-saturated model (D4-BT, T≈50). After scaling at T≈50, calibrated probabilities compress to ~0.5 — the model ranks correctly (high AUC) but probabilities are not interpretable.*
+
 ### Augmentation–accuracy tradeoff
 
 CNN+rotation augmentation underperforms the plain CNN baseline on the OOD test set across all data fractions: 0.523 vs 0.499 at 10% data, 0.622 vs 0.677 at 25%, 0.744 vs 0.783 at 50%, and 0.705 vs 0.723 at 100%. This is consistent with the augmentation-accuracy tradeoff documented in Gontijo-Lopes et al. (ICLR 2021) and Chen & Dobriban et al. (NeurIPS 2020): SAR backscatter is not rotationally symmetric due to radar look geometry (satellite overpass direction, terrain foreshortening, layover), so full 360° rotation augmentation forces the model to ignore discriminative orientation-dependent features.
 
 Equivariant architectures avoid this tradeoff entirely by encoding the relevant symmetry constraint into the architecture rather than approximating it through augmentation. D4 outperforms CNN+aug at every fraction (0.717 vs 0.523 at 10%, 0.789 vs 0.622 at 25%, 0.778 vs 0.744 at 50%, 0.769 vs 0.705 at 100%), and C8 does so as well except at 100% data. This confirms the theoretical prediction: exact structural equivariance is strictly preferable to learned approximate invariance when the group does not match the true symmetry of the data distribution.
+
+![Side-by-side line plots of validation AUC (left) and OOD test AUC (right) for CNN baseline and CNN+aug across all 4 data fractions. CNN+aug underperforms plain CNN on both validation and test at most fractions. The shaded region highlights where plain CNN leads. The gap is largest at 25% data (OOD: 0.677 vs 0.622).](figures/fig13_aug_tradeoff.png)
+
+*Augmentation–accuracy tradeoff: CNN+aug underperforms plain CNN on both val and OOD test at most fractions. The largest OOD gap is at 25% data (0.677 vs 0.622). Augmentation that destroys discriminative orientation-dependent SAR features hurts generalisation.*
 
 ### Continuous vs discrete equivariance
 

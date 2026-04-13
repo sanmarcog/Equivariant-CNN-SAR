@@ -857,12 +857,428 @@ def fig8_speckle_reduction(patch_csv: Path, out_dir: Path) -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# FIGURE 9 — Precision-recall curves
+# ─────────────────────────────────────────────────────────────────────────────
+def fig9_pr_curves(results_dir: Path, out_dir: Path) -> None:
+    try:
+        from sklearn.metrics import precision_recall_curve, average_precision_score
+    except ImportError as e:
+        print(f"  [skip fig9] missing: {e}")
+        return
+
+    _style()
+
+    # Models to plot: D4-BT at all 4 fracs, then single-image best @ 100%
+    RUNS = [
+        ("d4_bitemporal_frac0p1",  "D4-BT 10%",      PALETTE["d4_bitemporal"], "--",  6),
+        ("d4_bitemporal_frac0p25", "D4-BT 25%",       PALETTE["d4_bitemporal"], "-.",  6),
+        ("d4_bitemporal_frac0p5",  "D4-BT 50%",       PALETTE["d4_bitemporal"], ":",   6),
+        ("d4_bitemporal_frac1p0",  "D4-BT 100%",      PALETTE["d4_bitemporal"], "-",   9),
+        ("d4_frac1p0",             "D4 100%",          PALETTE["d4"],            "-",   6),
+        ("resnet_frac1p0",         "ResNet-18 100%",   PALETTE["resnet"],        "-",   6),
+        ("cnn_frac1p0",            "CNN baseline 100%",PALETTE["cnn"],           "-",   6),
+    ]
+    ALPHAS = [0.55, 0.65, 0.75, 1.0, 1.0, 1.0, 1.0]
+
+    fig, ax = plt.subplots(figsize=(7, 5))
+
+    for (run, label, color, ls, ms), alpha in zip(RUNS, ALPHAS):
+        npz_path = results_dir / run / "scores_test_ood_calibrated.npz"
+        met_path = results_dir / run / "metrics.json"
+        if not npz_path.exists():
+            continue
+
+        d    = np.load(npz_path)
+        probs = d["probs_uncal"]
+        labels = d["labels"]
+
+        # AUC-PR from metrics.json (avg_precision)
+        with open(met_path) as f:
+            mj = json.load(f)
+        auc_roc = mj["splits"]["test_ood"]["auc_roc"]
+        auc_pr  = mj["splits"]["test_ood"].get("avg_precision",
+                      average_precision_score(labels, probs))
+
+        prec, rec, thresholds = precision_recall_curve(labels, probs)
+
+        # Youden-optimal operating point (sensitivity + specificity - 1 maximised)
+        # Equivalent: find threshold in metrics.json at_optimal
+        opt_thr = mj["splits"]["test_ood"]["at_optimal"]["threshold"]
+        opt_rec = mj["splits"]["test_ood"]["at_optimal"]["recall"]
+        opt_pre = mj["splits"]["test_ood"]["at_optimal"]["precision"]
+
+        lw = 2.2 if "BT 100%" in label else 1.6
+        legend_txt = f"{label}  (AUC-ROC={auc_roc:.3f}, AUC-PR={auc_pr:.3f})"
+        ax.plot(rec, prec, color=color, ls=ls, lw=lw, alpha=alpha,
+                label=legend_txt, zorder=4 if "BT 100%" in label else 3)
+
+        # Mark operating point (only for D4-BT fracs and the baseline)
+        ax.scatter([opt_rec], [opt_pre], color=color, s=ms**2, zorder=6,
+                   edgecolors="white", linewidths=0.6)
+
+    # No-skill line at dataset prevalence
+    prevalence = 484 / 2211   # test_ood positives / total
+    ax.axhline(prevalence, color="#B0BEC5", lw=1.0, ls=":", zorder=1)
+    ax.text(0.02, prevalence + 0.01, f"No-skill (P={prevalence:.2f})",
+            fontsize=7, color="#78909C", va="bottom")
+
+    ax.set_xlabel("Recall")
+    ax.set_ylabel("Precision")
+    ax.set_title("Precision-Recall Curves — Tromsø OOD Test Set\n"
+                 "(dots = Youden-optimal operating point)")
+    ax.set_xlim(-0.02, 1.02)
+    ax.set_ylim(-0.02, 1.02)
+    ax.legend(loc="upper right", framealpha=0.95, edgecolor="0.8",
+              fontsize=7.5, labelspacing=0.25)
+
+    fig.tight_layout()
+    p = out_dir / "fig9_pr_curves.png"
+    fig.savefig(p)
+    plt.close(fig)
+    print(f"  Saved {p}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FIGURE 10 — Threshold sensitivity (F1/F2 vs threshold) for D4-BT frac0p5
+# ─────────────────────────────────────────────────────────────────────────────
+def fig10_threshold_sensitivity(results_dir: Path, out_dir: Path) -> None:
+    _style()
+
+    run      = "d4_bitemporal_frac0p5"
+    npz_path = results_dir / run / "scores_test_ood_calibrated.npz"
+    met_path = results_dir / run / "metrics.json"
+    if not npz_path.exists():
+        print(f"  [skip fig10] missing {npz_path}")
+        return
+
+    d      = np.load(npz_path)
+    probs  = d["probs_uncal"]
+    labels = d["labels"]
+
+    with open(met_path) as f:
+        mj = json.load(f)
+    youden_thr = mj["splits"]["test_ood"]["at_optimal"]["threshold"]
+
+    # Sweep thresholds
+    thresholds = np.linspace(0.0, 1.0, 500)
+    f1s, f2s = [], []
+    for t in thresholds:
+        preds = (probs >= t).astype(float)
+        tp = float(np.sum((preds == 1) & (labels == 1)))
+        fp = float(np.sum((preds == 1) & (labels == 0)))
+        fn = float(np.sum((preds == 0) & (labels == 1)))
+        if tp + fp + fn == 0:
+            f1s.append(0.0); f2s.append(0.0); continue
+        prec = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+        rec  = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        denom_f1 = (prec + rec)
+        denom_f2 = (4 * prec + rec)
+        f1s.append(2  * prec * rec / denom_f1 if denom_f1 > 0 else 0.0)
+        f2s.append(5  * prec * rec / denom_f2 if denom_f2 > 0 else 0.0)
+
+    f1s = np.array(f1s)
+    f2s = np.array(f2s)
+
+    # F2-optimal threshold
+    f2_opt_idx  = int(np.argmax(f2s))
+    f2_opt_thr  = float(thresholds[f2_opt_idx])
+    f2_opt_val  = float(f2s[f2_opt_idx])
+
+    # F2 at default 0.5
+    idx_05  = int(np.argmin(np.abs(thresholds - 0.5)))
+    f2_at05 = float(f2s[idx_05])
+    f2_gain = f2_opt_val - f2_at05
+
+    fig, ax = plt.subplots(figsize=(7, 4))
+
+    ax.plot(thresholds, f2s, color=PALETTE["d4_bitemporal"], lw=2.2,
+            label="F2 (β=2)", zorder=4)
+    ax.plot(thresholds, f1s, color="#9575CD", lw=1.6, ls="--",
+            label="F1 (β=1)", zorder=3)
+
+    # Vertical markers
+    ax.axvline(0.5,        color="#607D8B", lw=1.0, ls=":",
+               label="Default threshold (0.5)")
+    ax.axvline(f2_opt_thr, color=PALETTE["d4_bitemporal"], lw=1.2, ls="-.",
+               label=f"F2-optimal threshold ({f2_opt_thr:.3f})")
+    ax.axvline(youden_thr, color="#FF8F00", lw=1.0, ls=":",
+               label=f"Youden's J threshold ({youden_thr:.3f})")
+
+    # Annotate F2 gain
+    ax.annotate(
+        f"+{f2_gain:.3f} F2 from\nthreshold optimisation",
+        xy=(f2_opt_thr, f2_opt_val),
+        xytext=(f2_opt_thr + 0.07, f2_opt_val - 0.06),
+        fontsize=7.5, color=PALETTE["d4_bitemporal"],
+        arrowprops=dict(arrowstyle="->", color=PALETTE["d4_bitemporal"],
+                        lw=0.8),
+    )
+    # Dot at F2-optimal
+    ax.scatter([f2_opt_thr], [f2_opt_val],
+               color=PALETTE["d4_bitemporal"], s=50, zorder=6,
+               edgecolors="white", linewidths=0.8)
+    # Dot at 0.5
+    ax.scatter([0.5], [f2_at05], color="#607D8B", s=36, zorder=6,
+               edgecolors="white", linewidths=0.8)
+
+    ax.set_xlabel("Classification threshold")
+    ax.set_ylabel("Score")
+    ax.set_title("Threshold Sensitivity — D4-BT (50% data) on Tromsø OOD Test Set")
+    ax.set_xlim(-0.01, 1.01)
+    ax.set_ylim(-0.02, 1.02)
+    ax.legend(loc="upper left", framealpha=0.95, edgecolor="0.8",
+              fontsize=7.5, labelspacing=0.3)
+
+    fig.tight_layout()
+    p = out_dir / "fig10_threshold_sensitivity.png"
+    fig.savefig(p)
+    plt.close(fig)
+    print(f"  Saved {p}")
+    print(f"    F2-optimal threshold: {f2_opt_thr:.3f}  F2={f2_opt_val:.4f}")
+    print(f"    F2 gain over 0.5 default: +{f2_gain:.4f}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FIGURE 11 — Confusion matrix (D4-BT frac0p5 at F2-optimal threshold)
+# ─────────────────────────────────────────────────────────────────────────────
+def fig11_confusion_matrix(results_dir: Path, out_dir: Path) -> None:
+    _style()
+    plt.rcParams["axes.grid"] = False
+
+    run      = "d4_bitemporal_frac0p5"
+    npz_path = results_dir / run / "scores_test_ood_calibrated.npz"
+    met_path = results_dir / run / "metrics.json"
+    if not npz_path.exists():
+        print(f"  [skip fig11] missing {npz_path}")
+        return
+
+    d      = np.load(npz_path)
+    probs  = d["probs_uncal"]
+    labels = d["labels"].astype(int)
+
+    # Compute F2-optimal threshold from sweep
+    thresholds = np.linspace(0.0, 1.0, 1000)
+    best_thr, best_f2 = 0.5, -1.0
+    for t in thresholds:
+        preds = (probs >= t).astype(int)
+        tp = float(np.sum((preds == 1) & (labels == 1)))
+        fp = float(np.sum((preds == 1) & (labels == 0)))
+        fn = float(np.sum((preds == 0) & (labels == 1)))
+        denom = (4 * (tp / (tp + fp) if (tp + fp) > 0 else 0) + (tp / (tp + fn) if (tp + fn) > 0 else 0))
+        prec  = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+        rec   = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        f2    = 5 * prec * rec / (4 * prec + rec) if (4 * prec + rec) > 0 else 0.0
+        if f2 > best_f2:
+            best_f2, best_thr = f2, t
+
+    preds = (probs >= best_thr).astype(int)
+    tp = int(np.sum((preds == 1) & (labels == 1)))
+    fp = int(np.sum((preds == 1) & (labels == 0)))
+    fn = int(np.sum((preds == 0) & (labels == 1)))
+    tn = int(np.sum((preds == 0) & (labels == 0)))
+    n  = tp + fp + fn + tn
+
+    cm = np.array([[tp, fn],
+                   [fp, tn]])
+    row_totals = cm.sum(axis=1, keepdims=True)
+    cm_pct = 100.0 * cm / row_totals.clip(1)
+
+    fig, ax = plt.subplots(figsize=(5, 4))
+
+    # Custom two-tone colour: pink for correct, grey for errors
+    cell_colors = [
+        [PALETTE["d4_bitemporal"], "#EF9A9A"],   # row 0: TP correct=pink, FN=light red
+        ["#EF9A9A",               "#CFD8DC"],    # row 1: FP=light red, TN correct=grey
+    ]
+    cell_correct = [[True, False], [False, True]]
+
+    for i in range(2):
+        for j in range(2):
+            rect = plt.Rectangle([j, 1 - i], 1, 1,
+                                  facecolor=cell_colors[i][j], lw=0)
+            ax.add_patch(rect)
+            count = cm[i, j]
+            pct   = cm_pct[i, j]
+            text_color = "white" if cell_correct[i][j] else "#37474F"
+            ax.text(j + 0.5, 1.5 - i, f"{count}",
+                    ha="center", va="center", fontsize=18,
+                    fontweight="bold", color=text_color)
+            ax.text(j + 0.5, 1.5 - i - 0.22, f"({pct:.1f}%)",
+                    ha="center", va="center", fontsize=9, color=text_color)
+
+    # Axis labels
+    ax.set_xlim(0, 2); ax.set_ylim(0, 2)
+    ax.set_xticks([0.5, 1.5])
+    ax.set_xticklabels(["Predicted: Debris", "Predicted: Clean"], fontsize=9)
+    ax.set_yticks([0.5, 1.5])
+    ax.set_yticklabels(["Actual: Clean", "Actual: Debris"], fontsize=9)
+    ax.xaxis.set_ticks_position("top")
+    ax.xaxis.set_label_position("top")
+
+    # Labels on top
+    for sp in ax.spines.values():
+        sp.set_visible(False)
+    ax.tick_params(length=0)
+
+    prec = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+    rec  = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+    f2   = 5 * prec * rec / (4 * prec + rec) if (4 * prec + rec) > 0 else 0.0
+    f1   = 2 * prec * rec / (prec + rec) if (prec + rec) > 0 else 0.0
+
+    ax.set_title(
+        f"D4-BT (50% data) — Tromsø OOD Test Set\n"
+        f"Threshold = {best_thr:.3f} (F2-optimal)  |  "
+        f"F2 = {f2:.3f}  F1 = {f1:.3f}  Precision = {prec:.3f}  Recall = {rec:.3f}",
+        fontsize=8, pad=22,
+    )
+
+    fig.tight_layout()
+    p = out_dir / "fig11_confusion_matrix.png"
+    fig.savefig(p, facecolor="white")
+    plt.close(fig)
+    print(f"  Saved {p}  (threshold={best_thr:.3f}, F2={f2:.4f})")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FIGURE 12 — Temperature scaling illustration
+# ─────────────────────────────────────────────────────────────────────────────
+def fig12_temperature_scaling(results_dir: Path, out_dir: Path) -> None:
+    _style()
+    plt.rcParams["axes.grid"] = False
+
+    # Two models: well-calibrated d4_frac1p0 (T≈4.56) vs collapsed d4_bitemporal_frac0p5 (T≈50)
+    MODELS = [
+        ("d4_frac1p0",            "D4 (100% data)",    PALETTE["d4"],           4.56),
+        ("d4_bitemporal_frac0p5", "D4-BT (50% data)",  PALETTE["d4_bitemporal"], 50.0),
+    ]
+
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4), sharey=False)
+    titles = ["Before temperature scaling", "After temperature scaling"]
+
+    for ax, title in zip(axes, titles):
+        ax.set_title(title, fontsize=10, fontweight="bold", pad=6)
+        ax.set_xlabel("Predicted probability")
+        ax.set_ylabel("Density")
+        ax.set_xlim(-0.03, 1.03)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+
+    bins = np.linspace(0, 1, 51)
+    alpha_fill = 0.30
+
+    for run, label, color, temp in MODELS:
+        npz_path = results_dir / run / "scores_test_ood_calibrated.npz"
+        if not npz_path.exists():
+            continue
+        d = np.load(npz_path)
+        probs_uncal = d["probs_uncal"]
+        probs_cal   = d["probs_cal"]
+
+        for ax, probs in zip(axes, [probs_uncal, probs_cal]):
+            counts, edges = np.histogram(probs, bins=bins, density=True)
+            mids = 0.5 * (edges[:-1] + edges[1:])
+            ax.fill_between(mids, counts, alpha=alpha_fill, color=color)
+            ax.step(edges[:-1], counts, where="post",
+                    color=color, lw=1.8, label=f"{label}  (T={temp:.1f})")
+
+    # Annotations
+    axes[0].annotate(
+        "D4-BT: logits saturate\n(|logit| ≫ 1)\n→ probs cluster at 0 and 1",
+        xy=(0.92, 0.5), xycoords=("data", "axes fraction"),
+        xytext=(0.60, 0.72), textcoords=("data", "axes fraction"),
+        fontsize=7.5, color=PALETTE["d4_bitemporal"],
+        arrowprops=dict(arrowstyle="->", color=PALETTE["d4_bitemporal"], lw=0.8),
+    )
+    axes[1].annotate(
+        "After T≈50 scaling:\nprobs compress to ~0.5\n→ threshold must come from val set",
+        xy=(0.50, 0.5), xycoords=("data", "axes fraction"),
+        xytext=(0.08, 0.72), textcoords=("data", "axes fraction"),
+        fontsize=7.5, color=PALETTE["d4_bitemporal"],
+        arrowprops=dict(arrowstyle="->", color=PALETTE["d4_bitemporal"], lw=0.8),
+    )
+
+    for ax in axes:
+        ax.legend(loc="upper left", framealpha=0.95, edgecolor="0.8",
+                  fontsize=8, labelspacing=0.3)
+
+    fig.suptitle(
+        "Temperature Scaling: Well-calibrated (D4, T≈4.6) vs Logit-saturated (D4-BT, T≈50)",
+        fontsize=10, fontweight="bold",
+    )
+    fig.tight_layout(pad=0.8)
+    p = out_dir / "fig12_temperature_scaling.png"
+    fig.savefig(p)
+    plt.close(fig)
+    print(f"  Saved {p}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FIGURE 13 — Augmentation-accuracy tradeoff
+# ─────────────────────────────────────────────────────────────────────────────
+def fig13_aug_tradeoff(out_dir: Path) -> None:
+    _style()
+
+    # Verified from metrics.json on Hyak (2026-04-13)
+    CNN_VAL  = [0.6929, 0.7349, 0.7510, 0.7552]
+    CNN_TEST = [0.4988, 0.6765, 0.7833, 0.7233]
+    AUG_VAL  = [0.6925, 0.7039, 0.7297, 0.7610]
+    AUG_TEST = [0.5227, 0.6222, 0.7443, 0.7051]
+
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4.5), sharey=True)
+    titles = ["Validation AUC-ROC", "OOD Test AUC-ROC (Tromsø)"]
+    val_test = [(CNN_VAL, AUG_VAL), (CNN_TEST, AUG_TEST)]
+
+    for ax, title, (cnn_vals, aug_vals) in zip(axes, titles, val_test):
+        ax.plot(FRAC_X, cnn_vals,
+                color=PALETTE["cnn"], marker=MARKERS["cnn"], lw=2.0, ms=7,
+                label=LABELS["cnn"], zorder=4)
+        ax.plot(FRAC_X, aug_vals,
+                color=PALETTE["aug"], marker=MARKERS["aug"], lw=2.0, ms=7,
+                ls="--", label=LABELS["aug"], zorder=4)
+
+        # Shade the gap where aug < cnn
+        ax.fill_between(FRAC_X, cnn_vals, aug_vals,
+                        where=[c > a for c, a in zip(cnn_vals, aug_vals)],
+                        alpha=0.12, color=PALETTE["cnn"],
+                        label="CNN advantage", interpolate=True)
+
+        ax.set_xticks(FRAC_X)
+        ax.set_xticklabels(FRAC_LBL)
+        ax.set_xlabel("Training data fraction")
+        ax.set_title(title, fontsize=10)
+        ax.legend(loc="lower right", framealpha=0.95, edgecolor="0.8",
+                  fontsize=8, labelspacing=0.3)
+        ax.set_xlim(5, 108)
+
+    axes[0].set_ylabel("AUC-ROC")
+    # Annotate: augmentation costs OOD performance
+    axes[1].annotate(
+        "CNN+aug underperforms plain CNN\nat every data fraction",
+        xy=(25, AUG_TEST[1]), xycoords="data",
+        xytext=(40, 0.56), textcoords="data",
+        fontsize=8, color="#37474F",
+        arrowprops=dict(arrowstyle="->", color="#607D8B", lw=0.8),
+    )
+
+    fig.suptitle(
+        "Augmentation–Accuracy Tradeoff: CNN+aug consistently underperforms plain CNN\n"
+        "on the OOD test set — SAR backscatter has orientation-dependent structure",
+        fontsize=10, fontweight="bold",
+    )
+    fig.tight_layout(pad=0.8)
+    p = out_dir / "fig13_aug_tradeoff.png"
+    fig.savefig(p)
+    plt.close(fig)
+    print(f"  Saved {p}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # CLI
 # ─────────────────────────────────────────────────────────────────────────────
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Generate publication figures.")
     p.add_argument("--figures", nargs="+", default=["1", "2", "5", "6"],
-                   help="Which figures to generate (1-8 or 'all').")
+                   help="Which figures to generate (1-13 or 'all').")
     p.add_argument("--results-dir",  default="results")
     p.add_argument("--scene-dir",    default="data/raw/Tromso_20241220")
     p.add_argument("--prob-map",
@@ -881,7 +1297,8 @@ def main() -> None:
 
     figs = set(args.figures)
     if "all" in figs:
-        figs = {"1", "2", "3", "4", "5", "6", "7", "8"}
+        figs = {"1", "2", "3", "4", "5", "6", "7", "8",
+                "9", "10", "11", "12", "13"}
 
     results_dir = Path(args.results_dir)
     scene_dir   = Path(args.scene_dir)
@@ -920,6 +1337,26 @@ def main() -> None:
     if "8" in figs:
         print("Figure 8: speckle reduction…")
         fig8_speckle_reduction(patch_csv, out_dir)
+
+    if "9" in figs:
+        print("Figure 9: precision-recall curves…")
+        fig9_pr_curves(results_dir, out_dir)
+
+    if "10" in figs:
+        print("Figure 10: threshold sensitivity…")
+        fig10_threshold_sensitivity(results_dir, out_dir)
+
+    if "11" in figs:
+        print("Figure 11: confusion matrix…")
+        fig11_confusion_matrix(results_dir, out_dir)
+
+    if "12" in figs:
+        print("Figure 12: temperature scaling…")
+        fig12_temperature_scaling(results_dir, out_dir)
+
+    if "13" in figs:
+        print("Figure 13: augmentation-accuracy tradeoff…")
+        fig13_aug_tradeoff(out_dir)
 
     print(f"\nAll done. Figures saved to {out_dir}/")
 
