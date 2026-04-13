@@ -104,9 +104,18 @@ class CNNBiTemporal(nn.Module):
     classifies the difference vector.  This is the plain-CNN analogue of
     D4BiTemporalCNN: identical call signature, matched ~391K parameter count.
 
+    Regularization: the change vector (feat_post − feat_pre) is normalised with
+    BatchNorm1d before classification, and Dropout(p=0.5) is applied before the
+    linear head.  Without these, the plain CNN overfits severely (train loss
+    ~0.05, val loss ~1.5 by epoch 20) because it lacks the implicit
+    regularization that the equivariant weight-sharing constraint provides in
+    D4-BT — equivariant filters must lie in a group-equivariant subspace,
+    which acts as a strong structural prior that reduces effective capacity.
+
     Args:
         in_channels:   Number of input channels per branch (default: 5).
         base_channels: Width of the first conv block (default: 32).
+        dropout:       Dropout probability before the classifier (default: 0.5).
 
     Forward:
         forward(x_post, x_pre, return_orientation=False)
@@ -121,7 +130,12 @@ class CNNBiTemporal(nn.Module):
     # Detected by forward_logit() in train.py / evaluate.py
     bitemporal: bool = True
 
-    def __init__(self, in_channels: int = 5, base_channels: int = 32) -> None:
+    def __init__(
+        self,
+        in_channels: int = 5,
+        base_channels: int = 32,
+        dropout: float = 0.5,
+    ) -> None:
         super().__init__()
 
         c = base_channels
@@ -136,6 +150,14 @@ class CNNBiTemporal(nn.Module):
         # Global Average Pooling: [B, 8c, 4, 4] → [B, 8c]
         self.gap = nn.AdaptiveAvgPool2d(1)
 
+        # Normalise the change feature before classification.
+        # feat_post − feat_pre has higher variance than either branch alone;
+        # BN1d re-centres and rescales it to prevent logit saturation.
+        self.change_bn = nn.BatchNorm1d(c * 8)
+
+        # Dropout before the linear head as the primary regularizer.
+        self.dropout = nn.Dropout(p=dropout)
+
         # Classifier on change feature (post − pre)
         self.classifier = nn.Linear(c * 8, 1)
 
@@ -146,6 +168,9 @@ class CNNBiTemporal(nn.Module):
             if isinstance(m, nn.Conv2d):
                 nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
             elif isinstance(m, nn.BatchNorm2d):
+                nn.init.ones_(m.weight)
+                nn.init.zeros_(m.bias)
+            elif isinstance(m, nn.BatchNorm1d):
                 nn.init.ones_(m.weight)
                 nn.init.zeros_(m.bias)
             elif isinstance(m, nn.Linear):
@@ -174,10 +199,10 @@ class CNNBiTemporal(nn.Module):
         Returns:
             (logit [B, 1], None)
         """
-        feat_post = self._encode(x_post)        # [B, 8c]
-        feat_pre  = self._encode(x_pre)         # [B, 8c]
-        change    = feat_post - feat_pre         # [B, 8c]
-        logit     = self.classifier(change)      # [B, 1]
+        feat_post = self._encode(x_post)         # [B, 8c]
+        feat_pre  = self._encode(x_pre)          # [B, 8c]
+        change    = self.change_bn(feat_post - feat_pre)  # [B, 8c] — normalised
+        logit     = self.classifier(self.dropout(change)) # [B, 1]
         return logit, None
 
 
