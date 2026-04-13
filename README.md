@@ -194,19 +194,13 @@ No prior work applies group-equivariant CNNs to SAR detection or segmentation.
 
 ## Findings and observations
 
-### Bi-temporal change detection dominates single-image classification
+### 1. Bi-temporal change detection dominates single-image classification
 
 D4-BT achieves AUC 0.871–0.912 across all data fractions, compared to 0.499–0.803 for the best single-image models at any fraction. At **10% training data, D4-BT (AUC 0.871) already outperforms every single-image model at 100% data** (best: ResNet 0.803). The bi-temporal signal — comparing post-event to a pre-event reference from the same acquisition geometry — provides a much more discriminative input than post-event intensity alone.
 
 D4 equivariance applies to the change feature by linearity: if the shared encoder *f* is D4-equivariant, then *f*(*g*·x_post) − *f*(*g*·x_pre) = *g*·(*f*(x_post) − *f*(x_pre)), so the change vector is equivariant to simultaneous D4 rotations of both inputs. This means D4-BT inherits exact equivariance with no architectural overhead beyond a second forward pass.
 
-**Threshold calibration note:** D4-BT at 10/25/50% data converged with logit magnitudes far from 0 (temperature T≈50 after calibration), likely due to early stopping before logit scale regularisation fully kicks in. The model rank-orders well (high AUC) but probabilities are unreliable without calibration. For deployment, thresholds must be set from held-out validation scores; the F2-optimal threshold lies between 0.78 and 0.88 for these fracs.
-
-![Two-panel histogram showing probability distributions before (left) and after (right) temperature scaling, for D4 at 100% data (T≈4.6, purple) and D4-BT at 50% data (T≈50, pink). Before scaling, D4-BT probabilities are heavily saturated near 0 and 1. After T≈50 scaling, they collapse to a narrow band around 0.5, making raw probabilities unusable for deployment without val-set threshold calibration.](figures/fig12_temperature_scaling.png)
-
-*Temperature scaling for a well-calibrated model (D4, T≈4.6) versus a logit-saturated model (D4-BT, T≈50). After scaling at T≈50, calibrated probabilities compress to ~0.5 — the model ranks correctly (high AUC) but probabilities are not interpretable.*
-
-### Augmentation–accuracy tradeoff
+### 2. Exact structural equivariance beats approximate invariance via augmentation
 
 CNN+rotation augmentation underperforms the plain CNN baseline on the OOD test set across all data fractions: 0.523 vs 0.499 at 10% data, 0.622 vs 0.677 at 25%, 0.744 vs 0.783 at 50%, and 0.705 vs 0.723 at 100%. This is consistent with the augmentation-accuracy tradeoff documented in Gontijo-Lopes et al. (ICLR 2021) and Chen & Dobriban et al. (NeurIPS 2020): SAR backscatter is not rotationally symmetric due to radar look geometry (satellite overpass direction, terrain foreshortening, layover), so full 360° rotation augmentation forces the model to ignore discriminative orientation-dependent features.
 
@@ -216,11 +210,19 @@ Equivariant architectures avoid this tradeoff entirely by encoding the relevant 
 
 *Augmentation–accuracy tradeoff: CNN+aug underperforms plain CNN on both val and OOD test at most fractions. The largest OOD gap is at 25% data (0.677 vs 0.622). Augmentation that destroys discriminative orientation-dependent SAR features hurts generalisation.*
 
-### Continuous vs discrete equivariance
+### 3. Discrete exact equivariance beats continuous approximate equivariance
 
-O(2) (continuous dihedral, maximum_frequency=8) was tested but OOMed at 10% and 50% data fractions on 10.57 GB GPUs, and underperformed D4 at 25% and 100% data. This is consistent with the SO(2) finding: continuous approximate equivariance underperforms discrete exact equivariance at matched parameter count. O(2) is left as future work with larger GPU memory.
+SO(2) (continuous rotation group, truncated at maximum frequency L=4) underperforms D4 (discrete, exact) at matched parameter count at every tested fraction. O(2) (continuous dihedral, maximum_frequency=8) OOMed at 10% and 50% data fractions on 10.57 GB GPUs and underperformed D4 where it ran. Enforcing a tighter, physically-motivated symmetry (4 rotations + reflections matching avalanche runout bilateral symmetry) is more useful than enforcing a stronger but approximate one. This result is non-trivial — SO(2) has strictly stronger theoretical symmetry than C8, so the underperformance demonstrates that frequency truncation costs more than continuous coverage gains at this parameter budget.
 
-### Bilinear interpolation as accidental speckle reduction
+### 4. Logit saturation is a real deployment hazard
+
+D4-BT at 10/25/50% data converged with logit magnitudes far from 0 (temperature T≈50 after calibration), likely due to early stopping before logit scale regularisation fully kicks in. The model rank-orders well (high AUC) but raw probabilities are uninformative — everything is near 0 or 1 before calibration, and near 0.5 after. The F2-optimal threshold (0.862 for frac0p5) must be set from a held-out validation set, not assumed near 0.5.
+
+![Two-panel histogram showing probability distributions before (left) and after (right) temperature scaling, for D4 at 100% data (T≈4.6, purple) and D4-BT at 50% data (T≈50, pink). Before scaling, D4-BT probabilities are heavily saturated near 0 and 1. After T≈50 scaling, they collapse to a narrow band around 0.5, making raw probabilities unusable for deployment without val-set threshold calibration.](figures/fig12_temperature_scaling.png)
+
+*Temperature scaling for a well-calibrated model (D4, T≈4.6) versus a logit-saturated model (D4-BT, T≈50). After scaling at T≈50, calibrated probabilities compress to ~0.5 — the model ranks correctly (high AUC) but probabilities are not interpretable.*
+
+### 5. Bilinear interpolation at 45° is accidental speckle reduction
 
 Rotation sensitivity analysis (`scripts/rotation_sensitivity.py`): 200 Tromsø test patches rotated at 8 angles, inference with C8 model.
 
@@ -239,6 +241,14 @@ Bilinear interpolation at 45° acts as a spatial low-pass filter, partially redu
 - Explicit speckle filtering (Refined Lee, 5×5) before training/inference is expected to recover ~0.027 AUC across all models. Left as future work.
 - Bianchi et al. (2021) use 5×5 Refined Lee as standard preprocessing; our models do not. Direct F1 comparison should account for this gap.
 - Bianchi & Grahn (2025)'s rotation TTA may partly benefit from this interpolation-induced denoising, in addition to orientation coverage.
+
+### 6. The one genuine detection failure is physically explainable
+
+116/117 Tromsø reference polygons are detected at threshold 0.75. The single genuine miss (GT index 115, 612 m², elevation 803 m) is a 42° west-facing slope at Local Incidence Angle = 5° — severe layover geometry that compresses multiple terrain elevations into the same pixel, producing specular backscatter (VV = −2.3 dB, VV/VH ratio = 12.3 dB, nearly double the scene-typical 6 dB) completely unlike the distributed debris signature in the training data. The change signal is also weak (ΔVV = +1.6 dB vs scene median +3.4 dB). This is a known SAR physics limitation, not fixable at the patch-classifier level without LIA normalisation or multi-look processing. A second polygon (29 m², GT index 113) that appeared missed in earlier results was an evaluation artefact: the polygon is smaller than one pixel, and the model correctly scores the overlapping patch at 0.83.
+
+---
+
+**The overarching finding:** for a geographically diverse OOD test set, the right inductive bias — bi-temporal change signal combined with discrete group equivariance matched to the physical symmetry of the problem — matters far more than scale. D4-BT at 10% of the training data outperforms all single-image models at 100% of it.
 
 ---
 
