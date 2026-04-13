@@ -1,25 +1,40 @@
 # Equivariant CNNs for SAR Avalanche Debris Detection
 
-**Work in progress — training running on Hyak. Results updated as runs complete.**
-
-Three group-equivariant CNN architectures (C8, SO(2), D4) implemented via [escnn](https://github.com/QUVA-Lab/escnn) are compared against matched-parameter CNN baselines for binary avalanche debris classification on single post-event Sentinel-1 patches. Equivariance is enforced exactly by construction via steerable kernel bases derived from group representation theory, rather than approximated through data augmentation. Models are evaluated on the AvalCD dataset with Tromsø, Norway held out as a geographically unseen OOD test set.
+Three group-equivariant CNN architectures (C8, SO(2), D4) implemented via [escnn](https://github.com/QUVA-Lab/escnn) are compared against matched-parameter CNN baselines for binary avalanche debris classification on Sentinel-1 patches. A bi-temporal D4 extension (D4-BT) fuses pre- and post-event SAR via shared-weight equivariant encoding and an equivariant change feature. Equivariance is enforced exactly by construction via steerable kernel bases derived from group representation theory, rather than approximated through data augmentation. Models are evaluated on the AvalCD dataset with Tromsø, Norway held out as a geographically unseen OOD test set.
 
 ---
 
 ## Results
 
-OOD test set: Tromsø, Norway (never seen during training).
+OOD test set: Tromsø, Norway (never seen during training). Metric: AUC-ROC.
+
+### AUC-ROC by model and training data fraction
 
 | Model | 10% data | 25% data | 50% data | 100% data |
 |---|---|---|---|---|
-| C8 equivariant CNN | 0.703 | 0.713 | 0.745 | 0.780 |
-| SO(2) equivariant CNN | 0.606 | — | — | — |
-| D4 equivariant CNN | — | — | — | 0.789 |
-| CNN baseline (no aug) | — | — | — | — |
-| CNN + rotation augmentation | — | — | — | — |
-| ResNet-18 (fine-tuned) | — | — | — | — |
+| **D4-BT (bi-temporal, pre+post)** | **0.871** | **0.906** | **0.912** | **0.894** |
+| ResNet-18 (fine-tuned) | 0.555 | 0.786 | 0.743 | 0.803 |
+| D4 equivariant CNN | 0.717 | 0.789 | 0.778 | 0.769 |
+| CNN baseline (no aug) | 0.499 | 0.677 | 0.783 | 0.723 |
+| C8 equivariant CNN | 0.675 | 0.676 | 0.745 | 0.737 |
+| CNN + rotation augmentation | 0.523 | 0.622 | 0.744 | 0.705 |
+| SO(2) equivariant CNN | 0.645 | 0.660 | 0.672 | 0.724 |
+| O(2) equivariant CNN | 0.595 | — | — | — |
 
-Metric: AUC-ROC on Tromsø OOD test set. — = training in progress. F1/F2 after temperature scaling calibration pending.
+O(2) discontinued after OOM at 10%/50% data fractions; only 10% and 25% runs completed (25% eval killed by wall time). See [Findings](#findings-and-observations).
+
+### D4 BiTemporal — threshold analysis (F2-optimal, test_ood)
+
+F2 is the primary metric (β=2): recall weighted 4× over precision, appropriate for avalanche hazard detection where false negatives are more costly.
+
+| Frac | AUC | F1@opt | F2@opt | Optimal threshold | T (cal.) |
+|---|---|---|---|---|---|
+| 10% | 0.871 | 0.641 | 0.702 | 0.783 | 50.0¹ |
+| 25% | 0.906 | 0.698 | 0.752 | 0.875 | 50.0¹ |
+| 50% | **0.912** | **0.727** | **0.745** | 0.861 | 50.0¹ |
+| 100% | 0.894 | 0.677 | 0.738 | 0.597 | 1.15 |
+
+¹ T≈50: logits saturated — model is well-ranked (high AUC) but logit magnitudes are unreliable. Threshold must be set from validation scores, not assumed near 0.5. frac1p0 converged with calibrated probabilities (T=1.15).
 
 ---
 
@@ -33,7 +48,7 @@ Steerable CNNs (Weiler & Cesa, NeurIPS 2019) enforce equivariance by constructio
 
 ## Architecture
 
-All models: 4 convolutional blocks, ~391K parameters, matched across equivariant and baseline variants.
+All models: 4 convolutional blocks, ~391K parameters, matched across equivariant and baseline variants. D4-BT shares these same weights across two branches (pre- and post-event) — parameter count is identical to single-image D4.
 
 **Forward pass:**
 
@@ -107,6 +122,14 @@ No prior work applies group-equivariant CNNs to SAR detection or segmentation.
 
 ## Findings and observations
 
+### Bi-temporal change detection dominates single-image classification
+
+D4-BT achieves AUC 0.871–0.912 across all data fractions, compared to 0.499–0.803 for the best single-image models at any fraction. At **10% training data, D4-BT (AUC 0.871) already outperforms every single-image model at 100% data** (best: ResNet 0.803). The bi-temporal signal — comparing post-event to a pre-event reference from the same acquisition geometry — provides a much more discriminative input than post-event intensity alone.
+
+D4 equivariance applies to the change feature by linearity: if the shared encoder *f* is D4-equivariant, then *f*(*g*·x_post) − *f*(*g*·x_pre) = *g*·(*f*(x_post) − *f*(x_pre)), so the change vector is equivariant to simultaneous D4 rotations of both inputs. This means D4-BT inherits exact equivariance with no architectural overhead beyond a second forward pass.
+
+**Threshold calibration note:** D4-BT at 10/25/50% data converged with logit magnitudes far from 0 (temperature T≈50 after calibration), likely due to early stopping before logit scale regularisation fully kicks in. The model rank-orders well (high AUC) but probabilities are unreliable without calibration. For deployment, thresholds must be set from held-out validation scores; the F2-optimal threshold lies between 0.78 and 0.88 for these fracs.
+
 ### Augmentation–accuracy tradeoff
 
 CNN+aug shows lower val AUC than plain CNN (0.693 vs 0.742 at 10% data), consistent with the augmentation-accuracy tradeoff documented in Gontijo-Lopes et al. (ICLR 2021) and Chen & Dobriban et al. (NeurIPS 2020). Full 360° rotation augmentation forces the model to discard orientation-dependent features that are genuinely discriminative on the in-distribution validation set — a known failure mode when the augmentation group is broader than the true invariance group of the task. Equivariant architectures avoid this tradeoff by construction: C8 achieves higher val AUC than CNN+aug (0.703 vs 0.693) without any distribution shift during training. OOD test results pending.
@@ -157,6 +180,7 @@ Bilinear interpolation at 45° acts as a spatial low-pass filter, partially redu
 │
 ├── scripts/
 │   ├── run_eval_all.py             # Batch evaluate + calibrate all checkpoints
+│   ├── threshold_analysis.py       # F1/F2 at fixed and optimal thresholds, PR curves
 │   ├── plot_data_efficiency.py     # AUC vs. training fraction curves
 │   └── rotation_sensitivity.py    # Per-angle AUC and prediction variance analysis
 │
@@ -167,6 +191,7 @@ Bilinear interpolation at 45° acts as a spatial low-pass filter, partially redu
     ├── setup_venv.sh               # One-time venv setup inside Apptainer container
     ├── smoke_test.sh               # Single-job smoke test
     ├── train_array.sh              # 24-job array (6 models × 4 fractions)
+    ├── train_bitemporal.sh         # 4-job array (D4-BT × 4 fractions)
     ├── eval_all.sh                 # Evaluate + calibrate all completed runs
     └── eval_array.sh               # Per-run evaluation array
 ```
@@ -194,7 +219,8 @@ python -m tests.test_equivariance   # all 6 tests must pass
 
 # 5. Train (smoke test first, then full array)
 sbatch slurm/smoke_test.sh
-sbatch slurm/train_array.sh
+sbatch slurm/train_array.sh          # 6 models × 4 fractions
+sbatch slurm/train_bitemporal.sh     # D4-BT × 4 fractions
 
 # 6. Evaluate
 sbatch --dependency=afterok:<job_id> slurm/eval_all.sh
