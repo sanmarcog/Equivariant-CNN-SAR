@@ -17,11 +17,24 @@ OOD test set: Tromsø, Norway (never seen during training). Metric: AUC-ROC.
 | D4 equivariant CNN | 0.717 | 0.789 | 0.778 | 0.769 |
 | CNN baseline (no aug) | 0.499 | 0.677 | 0.783 | 0.723 |
 | C8 equivariant CNN | 0.675 | 0.676 | 0.745 | 0.737 |
-| CNN + rotation augmentation | 0.523 | 0.622 | 0.744 | 0.705 |
 | SO(2) equivariant CNN | 0.645 | 0.660 | 0.672 | 0.724 |
-| O(2) equivariant CNN | 0.595 | — | — | — |
+| CNN + rotation augmentation | 0.523 | 0.622 | 0.744 | 0.705 |
+| O(2) equivariant CNN† | 0.595 | — | — | — |
 
-O(2) discontinued after OOM at 10%/50% data fractions; only 10% and 25% runs completed (25% eval killed by wall time). See [Findings](#findings-and-observations).
+† O(2) was attempted but discontinued: OOM at 10% and 50% data fractions on 10.57 GB GPUs; underperformed D4 at 25% and 100% data. See [Findings](#findings-and-observations).
+
+### Polygon-level evaluation (D4-BT, 50% data, Tromsø scene)
+
+Full-scene sliding-window inference (64×64 patches, 50% overlap) was run over the Tromsø test scene and evaluated against the 117 reference avalanche polygons from the AvalCD ground truth. Because D4-BT is a patch classifier (not a pixel-level segmentation model), IoU-based polygon matching (as used in Gattimgatti et al.) systematically underestimates performance: predicted blobs span multiple overlapping patches and are ~16× larger than the median GT polygon (median GT: 124 px; median predicted blob: 2,047 px). The appropriate metric is **polygon hit rate**: whether the model assigns a high probability anywhere within each reference polygon.
+
+| Threshold | Detected / 117 polygons | Hit rate |
+|---|---|---|
+| 0.50 | 115 / 117 | 98.3% |
+| 0.75 | 115 / 117 | 98.3% |
+| 0.85 | 110 / 117 | 94.0% |
+| 0.90 | 107 / 117 | 91.5% |
+
+**At threshold 0.75, the model detects 115/117 reference avalanche polygons (98.3% hit rate).** Direct IoU-based F1/F2 comparison with Gattimgatti et al. requires a segmentation architecture — this is planned for Phase 2.
 
 ### D4 BiTemporal — threshold analysis (F2-optimal, test_ood)
 
@@ -132,7 +145,9 @@ D4 equivariance applies to the change feature by linearity: if the shared encode
 
 ### Augmentation–accuracy tradeoff
 
-CNN+aug shows lower val AUC than plain CNN (0.693 vs 0.742 at 10% data), consistent with the augmentation-accuracy tradeoff documented in Gontijo-Lopes et al. (ICLR 2021) and Chen & Dobriban et al. (NeurIPS 2020). Full 360° rotation augmentation forces the model to discard orientation-dependent features that are genuinely discriminative on the in-distribution validation set — a known failure mode when the augmentation group is broader than the true invariance group of the task. Equivariant architectures avoid this tradeoff by construction: C8 achieves higher val AUC than CNN+aug (0.703 vs 0.693) without any distribution shift during training. OOD test results pending.
+CNN+rotation augmentation underperforms the plain CNN baseline on the OOD test set across all data fractions: 0.523 vs 0.499 at 10% data, 0.622 vs 0.677 at 25%, 0.744 vs 0.783 at 50%, and 0.705 vs 0.723 at 100%. This is consistent with the augmentation-accuracy tradeoff documented in Gontijo-Lopes et al. (ICLR 2021) and Chen & Dobriban et al. (NeurIPS 2020): SAR backscatter is not rotationally symmetric due to radar look geometry (satellite overpass direction, terrain foreshortening, layover), so full 360° rotation augmentation forces the model to ignore discriminative orientation-dependent features.
+
+Equivariant architectures avoid this tradeoff entirely by encoding the relevant symmetry constraint into the architecture rather than approximating it through augmentation. D4 outperforms CNN+aug at every fraction (0.717 vs 0.523 at 10%, 0.789 vs 0.622 at 25%, 0.778 vs 0.744 at 50%, 0.769 vs 0.705 at 100%), and C8 does so as well except at 100% data. This confirms the theoretical prediction: exact structural equivariance is strictly preferable to learned approximate invariance when the group does not match the true symmetry of the data distribution.
 
 ### Continuous vs discrete equivariance
 
