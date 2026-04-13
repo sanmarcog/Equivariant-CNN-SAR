@@ -307,31 +307,64 @@ Bilinear interpolation at 45° acts as a spatial low-pass filter, partially redu
 
 ## Reproducing the experiments
 
-**Requirements:** SLURM cluster with NVIDIA GPU (sm_70+), Apptainer, `pytorch_24.12-py3.sif`, AvalCD dataset.
+**Hardware requirements:**
+- NVIDIA GPU with ≥11 GB VRAM, compute capability sm_70+ (Volta or newer)
+- CUDA 11.8 or later
+- SLURM cluster (any site); Apptainer/Singularity optional but recommended
+
+**Software:** any NVIDIA PyTorch container (PyTorch ≥2.0, torchvision, CUDA matching your driver). Install project dependencies on top:
 
 ```bash
-# 1. Download data
+pip install -r requirements.txt
+# torch and torchvision are provided by the container — do not reinstall them
+```
+
+If you are not using a container, create a virtual environment and install PyTorch manually first, then `pip install -r requirements.txt`.
+
+**Steps:**
+
+```bash
+# 1. Download AvalCD data
 python download_data.py --data-dir data/raw
 
-# 2. Build patches and splits
+# 2. Build patch inventory and geographic train/val/test splits
 python data_pipeline/build_manifest.py
 python data_pipeline/split.py
 
-# 3. Set up venv (run once on interactive GPU node)
-salloc -A demo -p ckpt --gres=gpu:1 --mem=16G --time=0:30:00
-bash slurm/setup_venv.sh
+# 3. Verify equivariance unit tests (all 6 must pass before training)
+python -m tests.test_equivariance
 
-# 4. Verify equivariance tests
-python -m tests.test_equivariance   # all 6 tests must pass
+# 4. Edit slurm/*.sh to set your cluster paths:
+#      SIF=  path to your PyTorch container image
+#      VENV= path to your virtual environment
+#      PROJECT= root directory of this repository on the cluster
+#    Then update #SBATCH --account and --partition to match your cluster.
 
-# 5. Train (smoke test first, then full array)
+# 5. Train — smoke test first, then full arrays
 sbatch slurm/smoke_test.sh
-sbatch slurm/train_array.sh          # 6 models × 4 fractions
-sbatch slurm/train_bitemporal.sh     # D4-BT × 4 fractions
+sbatch slurm/train_array.sh           # 28 jobs: 7 models × 4 data fractions
+sbatch slurm/train_bitemporal.sh      # 4 jobs:  D4-BT × 4 data fractions
+sbatch slurm/train_cnn_bitemporal.sh  # 4 jobs:  CNN-BT × 4 data fractions
 
-# 6. Evaluate
-sbatch --dependency=afterok:<job_id> slurm/eval_all.sh
+# 6. Evaluate all completed runs (submit after training, or with dependency)
+TRAIN_JOB=<job_id_from_step_5>
+sbatch --dependency=afterok:${TRAIN_JOB} slurm/eval_all.sh
+
+# 7. Plot data-efficiency curves
+python scripts/plot_data_efficiency.py --results-dir <path/to/results>
 ```
+
+**Without a SLURM cluster:** all training and evaluation scripts accept standard Python arguments and can be run directly. For example:
+
+```bash
+python train.py --model d4_bitemporal --data-fraction 1.0 --epochs 100
+python evaluate.py --model d4_bitemporal --data-fraction 1.0 \
+    --val-csv data/splits/val.csv --test-csv data/splits/test_ood.csv \
+    --stats-path data/splits/norm_stats.json \
+    --bitemporal-stats-path data/splits/norm_stats_bitemporal.json
+```
+
+> **Note:** Pre-trained checkpoints and a Docker image are planned for release on Zenodo — see Phase 2 roadmap.
 
 ---
 
