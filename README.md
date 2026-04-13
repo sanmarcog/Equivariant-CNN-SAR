@@ -48,7 +48,9 @@ Full-scene sliding-window inference (64×64 patches, 50% overlap) was run over t
 | 0.85 | 110 / 117 | 94.0% |
 | 0.90 | 107 / 117 | 91.5% |
 
-**At threshold 0.75, the model detects 116/117 reference avalanche polygons (99.1% hit rate).** The one genuine miss is caused by an extreme radar geometry limitation, not a model failure (see Detection limits below). Direct IoU-based F1/F2 comparison with Gattimgatti et al. requires a segmentation architecture — this is planned for Phase 2.
+**At threshold 0.75, the model detects 116/117 reference avalanche polygons (99.1% hit rate).** The one genuine miss is caused by an extreme radar geometry limitation, not a model failure (see Detection limits below).
+
+Our model localizes 116/117 annotated avalanche polygons (99.1%) at threshold 0.75, compared to 80.4% polygon recall reported by Gattimgatti et al. using a segmentation architecture on a slightly different annotation version (112 vs 117 polygons). Note that our hit-rate metric only requires high predicted probability within each polygon, not pixel-accurate boundary delineation — direct comparison requires a segmentation head, planned for Phase 2.
 
 ![VV backscatter (grayscale) of the Tromsø test scene overlaid with D4-BT probability map (plasma colormap, threshold 0.30). White outlines mark the 117 reference avalanche polygons. High-probability blobs align tightly with GT polygons.](figures/fig3_heatmap_overlay.png)
 
