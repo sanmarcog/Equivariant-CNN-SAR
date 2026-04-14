@@ -14,7 +14,6 @@
 # this pin prevents pip from upgrading it and breaking lie-learn.
 
 # Equivariance
-autograd
 pymanopt
 py3nj
 lie-learn==0.0.2

@@ -1,8 +1,10 @@
 # Equivariant CNNs for SAR Avalanche Debris Detection
 
-*Can group representation theory improve avalanche detection from satellite radar imagery?*
+*Group-equivariant CNNs combined with bi-temporal SAR change detection detect avalanche debris with less than 10% of the training data required by single-image models.*
 
-D4-equivariant bi-temporal CNNs detect 116/117 avalanche polygons (AUC=0.912) on a geographically unseen test set, matching the best single-image model's 100%-data performance with only 10% of the training data. Three group-equivariant CNN architectures (C8, SO(2), D4) implemented via [escnn](https://github.com/QUVA-Lab/escnn) are compared against matched-parameter CNN baselines for binary avalanche debris classification on Sentinel-1 patches. A bi-temporal D4 extension (D4-BT) fuses pre- and post-event SAR via shared-weight equivariant encoding and an equivariant change feature. Equivariance is enforced exactly by construction via steerable kernel bases derived from group representation theory, rather than approximated through data augmentation. Models are evaluated on the AvalCD dataset with Tromsø, Norway held out as a geographically unseen OOD test set.
+Undetected avalanche debris blocks roads, damages infrastructure, and creates secondary hazard chains — yet manual SAR interpretation is slow and operationally impractical at scale. This project shows that group-equivariant CNNs applied to bi-temporal Sentinel-1 change detection can match state-of-the-art avalanche detection with a fraction of the labelled data, tested on a geographically unseen scene.
+
+D4-equivariant bi-temporal CNNs detect 116/117 avalanche polygons (AUC=0.912) on a geographically unseen test set, matching the best single-image model's 100%-data performance with only 10% of the training data. Three group-equivariant CNN architectures (C8, SO(2), D4) implemented via [escnn](https://github.com/QUVA-Lab/escnn) are compared against matched-parameter CNN baselines for binary avalanche debris classification on Sentinel-1 patches. A bi-temporal D4 extension (D4-BT) fuses pre- and post-event SAR via shared-weight equivariant encoding and an equivariant change feature. Equivariance is enforced exactly by construction via steerable kernel bases derived from group representation theory, rather than approximated through data augmentation. Models are evaluated on the AvalCD dataset (Gattimgatti et al. 2026) with Tromsø, Norway held out as a geographically unseen OOD test set.
 
 ---
 
@@ -22,10 +24,10 @@ OOD test set: Tromsø, Norway (never seen during training). Metric: AUC-ROC.
 | C8 equivariant CNN | 0.675 | 0.676 | 0.745 | 0.737 |
 | SO(2) equivariant CNN | 0.645 | 0.660 | 0.672 | 0.724 |
 | CNN + rotation augmentation | 0.523 | 0.622 | 0.744 | 0.705 |
-| O(2) equivariant CNN‡ | 0.595 | — | — | — |
 
-† CNN-BT uses `BatchNorm1d` on the change feature and `Dropout(p=0.5)` before the classifier — explicit regularisation required because the plain CNN lacks the implicit regularisation that equivariant weight-sharing provides in D4-BT (see Finding 1).  
-‡ O(2) was attempted but discontinued: OOM at 10% and 50% data fractions on 10.57 GB GPUs; underperformed D4 at 25% and 100% data. See [Findings](#findings-and-observations).
+† CNN-BT uses `BatchNorm1d` on the change feature and `Dropout(p=0.5)` before the classifier — explicit regularisation required because the plain CNN lacks the implicit regularisation that equivariant weight-sharing provides in D4-BT (see Finding 2).  
+‡ O(2) was attempted but discontinued due to OOM at 10% and 50% data fractions on 10.57 GB GPUs and is excluded from the table (only 2 data points available). See [Findings](#findings-and-observations).  
+§ All values are single-seed; no variance estimate is available. See Limitations.
 
 ![Data-efficiency curves: AUC-ROC vs. training data fraction for all models on the Tromsø OOD test set. D4-BT (pink star, bold) is separated far above all single-image models at every fraction. D4 and ResNet-18 are the leading single-image models. CNN+aug consistently trails plain CNN, confirming the augmentation-accuracy tradeoff.](figures/fig1_data_efficiency.png)
 
@@ -60,7 +62,7 @@ Five additional caveats for context:
 
 3. **Parameter count: 2.39M vs ~391K.** Their Swin Transformer V2 model uses 2.39M parameters; D4-BT uses ~391K — approximately 6× fewer. Our model achieves competitive results at substantially lower model capacity.
 
-4. **Patch size and small-deposit sensitivity.** They use 128×128 patches (1181 m × 1181 m); we use 64×64 (591 m × 591 m). A D2-scale deposit (median ~5 100 m²) fills 0.37% of their patch versus 1.46% of ours — our patch size is structurally 4× more sensitive to small avalanches.
+4. **Patch size tradeoff.** They use 128×128 patches (1181 m × 1181 m); we use 64×64 (591 m × 591 m). A D2-scale deposit (median ~5 100 m²) fills 0.37% of their patch versus 1.46% of ours — our patch size is 4× more sensitive to small deposits. Conversely, large D4 deposits (median ~101 000 m²) span multiple 64×64 patches and require stitching at inference; their larger patches see more of a large deposit in a single forward pass. Neither choice is strictly better; the tradeoff depends on the target size distribution.
 
 5. **Phase 2 will enable a direct comparison.** Adding a pixel-level segmentation head (planned) will allow reporting IoU and polygon hit rate under their exact protocol on the same 117-polygon Tromsø test set, making the comparison fully apples-to-apples.
 
@@ -165,7 +167,7 @@ The three groups differ in how the regular representation decomposes into irreps
 |---|---|---|---|---|
 | C8 | Cyclic C₈ | 8 | 8 × 1D (freq k=0…7) | Exact equivariance at 45° grid |
 | D4 | Dihedral D₄ | 8 | 4 × 1D + 1 × 2D | Reflections motivated by debris bilateral symmetry |
-| SO(2) | Special orthogonal | ∞ | Truncated at L=4; 9D fields | **Approximate** equivariance: exact only for frequencies ≤4; higher-freq features break it |
+| SO(2) | Special orthogonal | ∞ | Truncated at L=4; 9D fields | **Approximate** equivariance: the frequency truncation (L=4) means the filter basis only spans equivariant maps for input features at angular frequencies 0–4; features at higher frequencies can break the intertwiner constraint |
 
 ---
 
@@ -228,7 +230,7 @@ An additional asymmetry emerged during training: CNN-BT required explicit regula
 
 ### 3. Exact structural equivariance beats approximate invariance via augmentation
 
-CNN+rotation augmentation underperforms the plain CNN baseline on the OOD test set across all data fractions: 0.523 vs 0.499 at 10% data, 0.622 vs 0.677 at 25%, 0.744 vs 0.783 at 50%, and 0.705 vs 0.723 at 100%. This is consistent with the augmentation-accuracy tradeoff documented in Gontijo-Lopes et al. (ICLR 2021) and Chen & Dobriban et al. (NeurIPS 2020): SAR backscatter is not rotationally symmetric due to radar look geometry (satellite overpass direction, terrain foreshortening, layover), so full 360° rotation augmentation forces the model to ignore discriminative orientation-dependent features.
+CNN+rotation augmentation (uniform random rotation over [0°, 360°) applied per-sample during training; bilinear interpolation, no other augmentations) underperforms the plain CNN baseline on the OOD test set across all data fractions: 0.523 vs 0.499 at 10% data, 0.622 vs 0.677 at 25%, 0.744 vs 0.783 at 50%, and 0.705 vs 0.723 at 100%. This is consistent with the augmentation-accuracy tradeoff documented in Gontijo-Lopes et al. (ICLR 2021) and Chen & Dobriban et al. (NeurIPS 2020): SAR backscatter is not rotationally symmetric due to radar look geometry (satellite overpass direction, terrain foreshortening, layover), so full 360° rotation augmentation forces the model to ignore discriminative orientation-dependent features. Note that this finding demonstrates the failure of full-circle augmentation in this domain; augmentation strategies restricted to physically plausible orientations were not tested.
 
 Equivariant architectures avoid this tradeoff entirely by encoding the relevant symmetry constraint into the architecture rather than approximating it through augmentation. D4 outperforms CNN+aug at every fraction (0.717 vs 0.523 at 10%, 0.789 vs 0.622 at 25%, 0.778 vs 0.744 at 50%, 0.769 vs 0.705 at 100%), and C8 does so as well except at 100% data. This confirms the theoretical prediction: exact structural equivariance is strictly preferable to learned approximate invariance when the group does not match the true symmetry of the data distribution.
 
@@ -238,11 +240,13 @@ Equivariant architectures avoid this tradeoff entirely by encoding the relevant 
 
 ### 4. Discrete exact equivariance beats continuous approximate equivariance
 
-SO(2) (continuous rotation group, truncated at maximum frequency L=4) underperforms D4 (discrete, exact) at matched parameter count at every tested fraction. O(2) (continuous dihedral, maximum_frequency=8) OOMed at 10% and 50% data fractions on 10.57 GB GPUs and underperformed D4 where it ran. Enforcing a tighter, physically-motivated symmetry (4 rotations + reflections matching avalanche runout bilateral symmetry) is more useful than enforcing a stronger but approximate one. This result is non-trivial — SO(2) has strictly stronger theoretical symmetry than C8, so the underperformance demonstrates that frequency truncation costs more than continuous coverage gains at this parameter budget.
+SO(2) (continuous rotation group, truncated at maximum frequency L=4) underperforms D4 (discrete, exact) at matched parameter count at every tested fraction. O(2) (continuous dihedral, maximum_frequency=8) OOMed at 10% and 50% data fractions on 10.57 GB GPUs and underperformed D4 where it ran. Within the tested configurations and parameter budget, enforcing a tighter, physically-motivated symmetry (4 rotations + reflections matching avalanche runout bilateral symmetry) is more useful than enforcing a stronger but approximate one. This result is non-trivial — SO(2) has strictly stronger theoretical symmetry than C8, so the underperformance demonstrates that frequency truncation costs more than continuous coverage gains at this scale. However, O(2) was tested at only 2 of 4 fractions; the conclusion about continuous vs discrete equivariance should be treated as preliminary.
 
 ### 5. Logit saturation is a real deployment hazard
 
 D4-BT at 10/25/50% data converged with logit magnitudes far from 0 (temperature T≈50 after calibration), likely due to early stopping before logit scale regularisation fully kicks in. The model rank-orders well (high AUC) but raw probabilities are uninformative — everything is near 0 or 1 before calibration. At T≈50, temperature scaling compresses logits by a factor of 50, which does not necessarily push calibrated probabilities to 0.5; the compressed distribution depends on the logit magnitudes in the validation set. The F2-optimal threshold (0.862 for frac0p5) is valid and set from the calibrated validation distribution — it must not be assumed near 0.5, but it is a genuine optimum on held-out data.
+
+**Convergence note:** logit saturation at low data fractions is consistent with aggressive early stopping (patience=10 epochs on val AUC) before the loss landscape has fully regularised logit scale. Whether longer training or a lower learning rate would eliminate saturation and improve calibration without hurting AUC is an open question not explored here.
 
 ![Two-panel histogram showing probability distributions before (left) and after (right) temperature scaling, for D4 at 100% data (T≈4.6, purple) and D4-BT at 50% data (T≈50, pink). Before scaling, D4-BT probabilities are heavily saturated near 0 and 1. After T≈50 scaling, they collapse to a narrow band around 0.5, making raw probabilities unusable for deployment without val-set threshold calibration.](figures/fig12_temperature_scaling.png)
 
@@ -284,6 +288,7 @@ Bilinear interpolation at 45° acts as a spatial low-pass filter, partially redu
 - **European and Arctic training data only.** The AvalCD training regions (Livigno, Nuuk, Pish) do not cover the full diversity of avalanche terrain globally; generalisation to e.g. North American or Himalayan terrain is unverified.
 - **Single training seed.** Each model/fraction combination was trained once; reported AUC values do not include confidence intervals or variance across seeds.
 - **Patch-level classifier limits fine-scale detection.** The 64×64 px patch stride means the model cannot precisely localise avalanche boundaries or reliably detect deposits smaller than one patch (~640 m²). The 29 m² sub-pixel polygon detected in this work is an extreme case.
+- **Polygon hit rate is a non-standard, post-hoc metric.** The "any high probability within the polygon" metric was designed to match the capability of a patch classifier, not a segmentation model. It has not been validated against operational detection requirements and is not directly comparable to the IoU-based metrics standard in the segmentation literature. Results on this metric should be interpreted alongside AUC-ROC, not instead of it.
 
 ---
 
