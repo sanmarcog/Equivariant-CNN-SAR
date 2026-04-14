@@ -4,7 +4,7 @@
 
 Undetected avalanche debris blocks roads, damages infrastructure, and creates secondary hazard chains — yet manual SAR interpretation is slow and operationally impractical at scale. This project shows that group-equivariant CNNs applied to bi-temporal Sentinel-1 change detection can match state-of-the-art avalanche detection with a fraction of the labelled data, tested on a geographically unseen scene.
 
-D4-equivariant bi-temporal CNNs detect 116/117 avalanche polygons (AUC=0.912) on a geographically unseen test set, matching the best single-image model's 100%-data performance with only 10% of the training data. Three group-equivariant CNN architectures (C8, SO(2), D4) implemented via [escnn](https://github.com/QUVA-Lab/escnn) are compared against matched-parameter CNN baselines for binary avalanche debris classification on Sentinel-1 patches. A bi-temporal D4 extension (D4-BT) fuses pre- and post-event SAR via shared-weight equivariant encoding and an equivariant change feature. Equivariance is enforced exactly by construction via steerable kernel bases derived from group representation theory, rather than approximated through data augmentation. Models are evaluated on the AvalCD dataset (Gattimgatti et al. 2026) with Tromsø, Norway held out as a geographically unseen OOD test set.
+D4-equivariant bi-temporal CNNs detect 116/117 avalanche polygons (AUC=0.912) on a geographically unseen test set, matching the best single-image model's 100%-data performance with only 10% of the training data. Three group-equivariant CNN architectures (C8, SO(2), D4) implemented via [escnn](https://github.com/QUVA-Lab/escnn) are compared against matched-parameter CNN baselines for binary avalanche debris classification on Sentinel-1 patches. A bi-temporal D4 extension (D4-BT) fuses pre- and post-event SAR via shared-weight equivariant encoding and an equivariant change feature. Equivariance is enforced exactly by construction via steerable kernel bases derived from group representation theory, rather than approximated through data augmentation. Models are evaluated on the AvalCD dataset (Gatti et al. 2026) with Tromsø, Norway held out as a geographically unseen OOD test set.
 
 ---
 
@@ -39,7 +39,7 @@ OOD test set: Tromsø, Norway (never seen during training). Metric: AUC-ROC.
 
 ### Polygon-level evaluation (D4-BT, 50% data, Tromsø scene)
 
-Full-scene sliding-window inference (64×64 patches, 50% overlap) was run over the Tromsø test scene and evaluated against the 117 reference avalanche polygons from the AvalCD ground truth. Because D4-BT is a patch classifier (not a pixel-level segmentation model), IoU-based polygon matching (as used in Gattimgatti et al.) systematically underestimates performance: predicted blobs span multiple overlapping patches and are ~16× larger than the median GT polygon (median GT: 124 px; median predicted blob: 2,047 px). The appropriate metric is **polygon hit rate**: whether the model assigns a high probability anywhere within each reference polygon. Evaluation uses `all_touched=True` rasterization so sub-pixel polygons (area < 1 pixel) are correctly handled.
+Full-scene sliding-window inference (64×64 patches, 50% overlap) was run over the Tromsø test scene and evaluated against the 117 reference avalanche polygons from the AvalCD ground truth. Because D4-BT is a patch classifier (not a pixel-level segmentation model), IoU-based polygon matching (as used in Gatti et al.) systematically underestimates performance: predicted blobs span multiple overlapping patches and are ~16× larger than the median GT polygon (median GT: 124 px; median predicted blob: 2,047 px). The appropriate metric is **polygon hit rate**: whether the model assigns a high probability anywhere within each reference polygon. Evaluation uses `all_touched=True` rasterization so sub-pixel polygons (area < 1 pixel) are correctly handled.
 
 | Threshold | Detected / 117 polygons | Hit rate |
 |---|---|---|
@@ -52,13 +52,13 @@ Full-scene sliding-window inference (64×64 patches, 50% overlap) was run over t
 
 #### Comparison caveats
 
-Our 99.1% hit rate and Gattimgatti et al.'s 80.4% polygon recall measure fundamentally different things and should not be compared directly. Our metric asks: *does the model assign any high probability within each reference polygon?* — a patch-classifier task that does not require pixel-accurate boundary delineation. Gattimgatti et al. report segmentation recall: the fraction of polygon area covered by predicted positive pixels, using a segmentation architecture. The two numbers are not measuring the same capability.
+Our 99.1% hit rate and Gatti et al.'s 80.4% polygon recall measure fundamentally different things and should not be compared directly. Our metric asks: *does the model assign any high probability within each reference polygon?* — a patch-classifier task that does not require pixel-accurate boundary delineation. Gatti et al. report segmentation recall: the fraction of polygon area covered by predicted positive pixels, using a segmentation architecture. The two numbers are not measuring the same capability.
 
 Five additional caveats for context:
 
 1. **Geographic split is identical.** Both studies train on Livigno + Nuuk + Pish and test on Tromsø only. Tromsø is fully excluded from training and validation in both works. The OOD generalisation claim is directly comparable and not inflated by in-distribution data.
 
-2. **Polygon count: 112 vs 117.** Gattimgatti et al. evaluate on 112 polygons; we evaluate on all 117, including 5 sub-pixel D1 events (area < 1 SAR pixel). Our hit rate denominator is slightly harder.
+2. **Polygon count: 112 vs 117.** Gatti et al. evaluate on 112 polygons; we evaluate on all 117, including 5 sub-pixel D1 events (area < 1 SAR pixel). Our hit rate denominator is slightly harder.
 
 3. **Parameter count: 2.39M vs ~391K.** Their Swin Transformer V2 model uses 2.39M parameters; D4-BT uses ~391K — approximately 6× fewer. Our model achieves competitive results at substantially lower model capacity.
 
@@ -199,7 +199,7 @@ The three groups differ in how the regular representation decomposes into irreps
 | Waldeland et al., IGARSS 2018 | Patch classification, Sentinel-1 | >90% accuracy | First DL approach |
 | Bianchi et al., JSTARS 2021 | Semantic segmentation, 6-ch S1+DEM | F1=0.666 | Closest input paradigm; uses 5×5 Refined Lee filter |
 | Bianchi & Grahn, arXiv:2502.18157 (2025) | Segmentation benchmark, 10+ architectures | FPN+Xception best; uses rotation TTA at inference | TTA is an inference-time rotation invariance patch; equivariant architecture removes it by construction |
-| Gattimgatti et al., arXiv:2603.22658 (2026) | Bi-temporal change detection | F1=0.806, F2=0.841 on Tromsø | Same test region; different task (pre+post vs. post-only) |
+| Gatti et al., arXiv:2603.22658 (2026) | Bi-temporal change detection | F1=0.806, F2=0.841 on Tromsø | Same test region; different task (pre+post vs. post-only) |
 | Han et al. (ReDet), CVPR 2021 | Aerial object detection, optical | +1.2–3.5 mAP, −60% params vs. SOTA | Closest equivariant architecture; uses C4 via e2cnn on optical only |
 
 To our knowledge, no prior work applies group-equivariant CNNs to SAR detection or segmentation (based on a search of IEEE IGARSS, JSTARS, and arXiv 2018–2026).
@@ -404,7 +404,7 @@ python evaluate.py --model d4_bitemporal --data-fraction 1.0 \
 - Bianchi et al. (2021). *Snow Avalanche Segmentation in SAR Images With FCNNs.* IEEE JSTARS. arXiv:1910.05411.
 - Han et al. (2021). *ReDet: A Rotation-Equivariant Detector for Aerial Object Detection.* CVPR 2021. arXiv:2103.07733.
 - Bianchi & Grahn (2025). *Monitoring Snow Avalanches from SAR Data with Deep Learning.* arXiv:2502.18157.
-- Gattimgatti et al. (2026). *Large-Scale Avalanche Mapping from SAR Images with Deep Learning-based Change Detection.* arXiv:2603.22658.
+- Gatti et al. (2026). *Large-Scale Avalanche Mapping from SAR Images with Deep Learning-based Change Detection.* arXiv:2603.22658.
 - Gatti, M. et al. (2026). *AvalCD dataset.* Zenodo. [doi:10.5281/zenodo.15863589](https://zenodo.org/records/15863589).
 - Weiler & Cesa (2019). *General E(2)-Equivariant Steerable CNNs.* NeurIPS 2019. arXiv:1911.08251.
 - Cesa et al. (2022). *A Program to Build E(N)-Equivariant Steerable CNNs.* ICLR 2022. [escnn](https://github.com/QUVA-Lab/escnn).
