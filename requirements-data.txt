@@ -1,0 +1,9 @@
+# Requirements for optional data-download pipeline only.
+#
+# These packages are NOT needed to train or evaluate models — only to
+# download raw Sentinel-1 scenes from the Copernicus Open Access Hub.
+# Install separately if you need to reproduce the data fetch step:
+#
+#   pip install -r requirements-data.txt
+
+sentinelsat

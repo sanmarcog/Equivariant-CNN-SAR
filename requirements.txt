@@ -1,17 +1,27 @@
 # Requirements for Equivariant CNNs for SAR Avalanche Debris Detection
 #
-# Base environment: NVIDIA PyTorch container pytorch_24.12-py3.sif
+# ── On Hyak (NVIDIA PyTorch Apptainer container) ────────────────────────────
+# Base environment: pytorch_24.12-py3.sif
 #   (PyTorch 2.6.0 + CUDA 12.4, torchvision, numpy 2.2 provided by container)
-#
 # Install these on top of the container venv (see slurm/setup_venv.sh):
 #   pip install -r requirements.txt
 #
-# Note: torch and torchvision are provided by the container; do not list them
-# here or pip will attempt to reinstall a CPU-only wheel.
+# ── On a local machine (CPU / MPS) ──────────────────────────────────────────
+# Install PyTorch FIRST, before this file, so pip does not pull a CPU-only
+# wheel here when a CUDA wheel is already installed:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+#   pip install -r requirements.txt
 #
-# Note: numpy is pinned <2 because lie-learn (a dependency of escnn) is
+# ── Notes ────────────────────────────────────────────────────────────────────
+# torch and torchvision are NOT listed here — they are either provided by the
+# container or must be installed manually (see above) to avoid pip overwriting
+# a CUDA-enabled wheel with a CPU-only one.
+#
+# numpy is pinned <2 because lie-learn (a dependency of escnn) is
 # incompatible with the numpy 2.x API changes. The container ships numpy 2.x;
 # this pin prevents pip from upgrading it and breaking lie-learn.
+#
+# Data-download dependencies (sentinelsat) are in requirements-data.txt.
 
 # Equivariance
 pymanopt
@@ -27,7 +37,6 @@ matplotlib
 seaborn
 rasterio>=1.3
 geopandas>=0.14
-sentinelsat
 pandas
 tifffile
 scipy
