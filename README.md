@@ -15,7 +15,7 @@ OOD test set: Tromsø, Norway (never seen during training). Metric: AUC-ROC.
 | Model | 10% data | 25% data | 50% data | 100% data |
 |---|---|---|---|---|
 | **D4-BT (bi-temporal, pre+post)** | **0.871** | **0.906** | **0.912** | **0.894** |
-| CNN-BT (bi-temporal, no equiv.)† | — | — | — | — |
+| CNN-BT (bi-temporal, no equiv.)† | 0.683 | 0.724 | 0.789 | 0.703 |
 | ResNet-18 (fine-tuned) | 0.555 | 0.786 | 0.743 | 0.803 |
 | D4 equivariant CNN | 0.717 | 0.789 | 0.778 | 0.769 |
 | CNN baseline (no aug) | 0.499 | 0.677 | 0.783 | 0.723 |
@@ -24,7 +24,7 @@ OOD test set: Tromsø, Norway (never seen during training). Metric: AUC-ROC.
 | CNN + rotation augmentation | 0.523 | 0.622 | 0.744 | 0.705 |
 | O(2) equivariant CNN‡ | 0.595 | — | — | — |
 
-† CNN-BT training in progress — results pending.  
+† CNN-BT uses `BatchNorm1d` on the change feature and `Dropout(p=0.5)` before the classifier — explicit regularisation required because the plain CNN lacks the implicit regularisation that equivariant weight-sharing provides in D4-BT (see Finding 1).  
 ‡ O(2) was attempted but discontinued: OOM at 10% and 50% data fractions on 10.57 GB GPUs; underperformed D4 at 25% and 100% data. See [Findings](#findings-and-observations).
 
 ![Data-efficiency curves: AUC-ROC vs. training data fraction for all models on the Tromsø OOD test set. D4-BT (pink star, bold) is separated far above all single-image models at every fraction. D4 and ResNet-18 are the leading single-image models. CNN+aug consistently trails plain CNN, confirming the augmentation-accuracy tradeoff.](figures/fig1_data_efficiency.png)
@@ -200,7 +200,7 @@ D4-BT achieves AUC 0.871–0.912 across all data fractions, compared to 0.499–
 
 D4 equivariance applies to the change feature by linearity: if the shared encoder *f* is D4-equivariant, then *f*(*g*·x_post) − *f*(*g*·x_pre) = *g*·(*f*(x_post) − *f*(x_pre)), so the change vector is equivariant to simultaneous D4 rotations of both inputs. This means D4-BT inherits exact equivariance with no architectural overhead beyond a second forward pass.
 
-**Ablation (bi-temporal signal vs equivariance):** CNN-BT results pending — see results table above. The comparison will quantify how much of D4-BT's gain comes from the bi-temporal input versus the equivariant architecture.
+**Ablation (bi-temporal signal vs equivariance):** CNN-BT (plain CNN, bi-temporal, ~391K params, matched architecture) achieves AUC 0.683 / 0.724 / 0.789 / 0.703 at 10/25/50/100% data. D4-BT leads by **+0.188 / +0.182 / +0.123 / +0.191 AUC** at every fraction — gaps that are 4–6× larger than the 0.03 threshold we set for "significant additive gain." F1 and F2 tell the same story: D4-BT F1 0.641–0.727 vs CNN-BT 0.447–0.547; D4-BT F2 0.702–0.752 vs CNN-BT 0.538–0.597. **Verdict: the equivariant architecture provides large, consistent additive gain over bi-temporal change detection alone.** Both the bi-temporal input and D4 equivariance are necessary — bi-temporal CNN without equivariance barely outperforms the best single-image models (CNN-BT max AUC 0.789 vs ResNet-18 0.803 at 100% data), while D4-BT at 10% data already clears 0.871.
 
 **Note — equivariant weight-sharing as implicit regularization.** When training CNN-BT (the plain-CNN bi-temporal ablation), we observed severe overfitting: train loss reached ~0.05 by epoch 20 while val loss diverged to ~1.5, forcing early stopping before the model could generalise. This was not observed in D4-BT. The difference is structural: equivariant filters must lie in a group-equivariant subspace of all possible convolutional filters — this constraint reduces the effective parameter count relative to the nominal count, acting as a strong structural prior even when the nominal parameter counts are matched (~391K each). In other words, equivariance simultaneously enforces the desired symmetry *and* regularizes the model, without requiring explicit dropout or weight decay tuning. CNN-BT requires explicit BatchNorm on the change feature and Dropout(p=0.5) to achieve comparable training stability.
 
@@ -260,7 +260,6 @@ Bilinear interpolation at 45° acts as a spatial low-pass filter, partially redu
 
 - **Single OOD scene.** The OOD test set consists of one Tromsø scene from one acquisition date. Performance on other unseen geographies, seasons, or SAR look angles has not been evaluated.
 - **European and Arctic training data only.** The AvalCD training regions (Livigno, Nuuk, Pish) do not cover the full diversity of avalanche terrain globally; generalisation to e.g. North American or Himalayan terrain is unverified.
-- **No plain CNN bi-temporal baseline yet.** `cnn_bitemporal` training jobs are submitted but results are not yet available. The comparison between D4-BT and a plain CNN with the same bi-temporal architecture is pending.
 - **Single training seed.** Each model/fraction combination was trained once; reported AUC values do not include confidence intervals or variance across seeds.
 - **Patch-level classifier limits fine-scale detection.** The 64×64 px patch stride means the model cannot precisely localise avalanche boundaries or reliably detect deposits smaller than one patch (~640 m²). The 29 m² sub-pixel polygon detected in this work is an extreme case.
 
