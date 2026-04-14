@@ -173,7 +173,7 @@ The three groups differ in how the regular representation decomposes into irreps
 
 ## Dataset
 
-[AvalCD](https://zenodo.org/records/15863589) (Gattimgatti et al., 2026) — Sentinel-1 SAR patches, four geographic regions:
+[AvalCD](https://zenodo.org/records/15863589) (Gatti et al., 2026) — Sentinel-1 SAR patches, four geographic regions:
 
 | Region | Events | Role |
 |---|---|---|
@@ -405,7 +405,7 @@ python evaluate.py --model d4_bitemporal --data-fraction 1.0 \
 - Han et al. (2021). *ReDet: A Rotation-Equivariant Detector for Aerial Object Detection.* CVPR 2021. arXiv:2103.07733.
 - Bianchi & Grahn (2025). *Monitoring Snow Avalanches from SAR Data with Deep Learning.* arXiv:2502.18157.
 - Gattimgatti et al. (2026). *Large-Scale Avalanche Mapping from SAR Images with Deep Learning-based Change Detection.* arXiv:2603.22658.
-- Gattimgatti et al. (2026). *AvalCD dataset.* Zenodo. [doi:10.5281/zenodo.15863589](https://zenodo.org/records/15863589).
+- Gatti, M. et al. (2026). *AvalCD dataset.* Zenodo. [doi:10.5281/zenodo.15863589](https://zenodo.org/records/15863589).
 - Weiler & Cesa (2019). *General E(2)-Equivariant Steerable CNNs.* NeurIPS 2019. arXiv:1911.08251.
 - Cesa et al. (2022). *A Program to Build E(N)-Equivariant Steerable CNNs.* ICLR 2022. [escnn](https://github.com/QUVA-Lab/escnn).
 - Dalsasso, Denis & Tupin (2021). *How to handle spatial correlations in SAR despeckling.* EUSAR 2021. HAL:hal-02538046.
