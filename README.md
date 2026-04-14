@@ -50,7 +50,19 @@ Full-scene sliding-window inference (64×64 patches, 50% overlap) was run over t
 
 #### Comparison caveats
 
-Our 99.1% hit rate and Gattimgatti et al.'s 80.4% polygon recall measure fundamentally different things and should not be compared directly. Our metric asks: *does the model assign any high probability within each reference polygon?* — a patch-classifier task that does not require pixel-accurate boundary delineation. Gattimgatti et al. report segmentation recall: the fraction of polygon area covered by predicted positive pixels, using a segmentation architecture on a slightly different annotation version (112 vs 117 polygons). The two numbers are not measuring the same capability. Direct comparison would require a segmentation head (planned for Phase 2).
+Our 99.1% hit rate and Gattimgatti et al.'s 80.4% polygon recall measure fundamentally different things and should not be compared directly. Our metric asks: *does the model assign any high probability within each reference polygon?* — a patch-classifier task that does not require pixel-accurate boundary delineation. Gattimgatti et al. report segmentation recall: the fraction of polygon area covered by predicted positive pixels, using a segmentation architecture. The two numbers are not measuring the same capability.
+
+Five additional caveats for context:
+
+1. **Geographic split is identical.** Both studies train on Livigno + Nuuk + Pish and test on Tromsø only. Tromsø is fully excluded from training and validation in both works. The OOD generalisation claim is directly comparable and not inflated by in-distribution data.
+
+2. **Polygon count: 112 vs 117.** Gattimgatti et al. evaluate on 112 polygons; we evaluate on all 117, including 5 sub-pixel D1 events (area < 1 SAR pixel). Our hit rate denominator is slightly harder.
+
+3. **Parameter count: 2.39M vs ~391K.** Their Swin Transformer V2 model uses 2.39M parameters; D4-BT uses ~391K — approximately 6× fewer. Our model achieves competitive results at substantially lower model capacity.
+
+4. **Patch size and small-deposit sensitivity.** They use 128×128 patches (1181 m × 1181 m); we use 64×64 (591 m × 591 m). A D2-scale deposit (median ~5 100 m²) fills 0.37% of their patch versus 1.46% of ours — our patch size is structurally 4× more sensitive to small avalanches.
+
+5. **Phase 2 will enable a direct comparison.** Adding a pixel-level segmentation head (planned) will allow reporting IoU and polygon hit rate under their exact protocol on the same 117-polygon Tromsø test set, making the comparison fully apples-to-apples.
 
 ![VV backscatter (grayscale) of the Tromsø test scene overlaid with D4-BT probability map (plasma colormap, threshold 0.30). White outlines mark the 117 reference avalanche polygons. High-probability blobs align tightly with GT polygons.](figures/fig3_heatmap_overlay.png)
 
