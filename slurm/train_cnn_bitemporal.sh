@@ -29,6 +29,7 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --gres=gpu:2
+#SBATCH --constraint="2080ti|rtx6k|a40|a100|l40|l40s|h200"
 #SBATCH --mem=32G
 #SBATCH --time=4:00:00
 #SBATCH --output=/gscratch/scrubbed/sanmarco/equivariant-sar/logs/cnn_bitemporal_%a.log
