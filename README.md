@@ -132,6 +132,10 @@ All models: 4 convolutional blocks, ~391K parameters, matched across equivariant
 
 *Equivariant CNN architecture (C8/D4/SO(2)/D4-BT). Steerable convolution blocks (purple) feed two heads: a classification head (blue) and an equivariant orientation head for visualisation (amber). D4-BT (pink) adds a shared pre-event branch whose change feature inherits D4 equivariance by linearity.*
 
+![D4-BT bi-temporal flow: pre- and post-event SAR patches (5 channels each) are processed by weight-sharing D4-equivariant encoders (purple). The element-wise difference of the deepest feature maps (pink) is fed through GroupPooling and a linear classification head (blue) to produce P(debris). Auxiliary terrain inputs (slope, sin/cos aspect) are stacked into the 5-channel input rather than routed through a separate aux encoder.](figures/fig14_bitemporal_flow.png)
+
+*D4-BT bi-temporal flow (mirrors Gatti et al. 2026, Fig. 4, for direct architectural comparison). Twin weight-sharing equivariant encoders extract temporally aligned features from pre- and post-event patches; their element-wise difference is D4-equivariant by linearity of the group action and feeds the patch-level classification head. Phase 1 omits Gatti's separate auxiliary encoder by stacking terrain channels into the SAR input; this keeps the parameter count at ~391K (~6× fewer than Gatti's ~2.39M SwinV2-Tiny).*
+
 **Forward pass:**
 
 ```

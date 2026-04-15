@@ -680,6 +680,139 @@ def fig6_architecture(out_dir: Path) -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# FIGURE 14 — Bi-temporal flow schematic (D4-BT twin-encoder + difference fusion)
+# ─────────────────────────────────────────────────────────────────────────────
+def fig14_bitemporal_flow(out_dir: Path) -> None:
+    _style()
+    plt.rcParams["axes.grid"] = False
+    plt.rcParams["axes.spines.bottom"] = False
+    plt.rcParams["axes.spines.left"] = False
+
+    fig, ax = plt.subplots(figsize=(11, 4.8))
+    ax.set_xlim(0, 11)
+    ax.set_ylim(0, 4.8)
+    ax.set_axis_off()
+
+    C_BG    = "#F5F5F5"
+    C_EQV   = "#EDE7F6"   # equivariant encoder blocks: light purple
+    C_HEAD1 = "#E3F2FD"   # classification head: light blue
+    C_BT    = "#FCE4EC"   # bi-temporal / difference: light pink
+    C_ARROW = "#455A64"
+
+    def box(x, y, w, h, label, sublabel="", color=C_BG, fontsize=8.5):
+        b = FancyBboxPatch((x, y), w, h, boxstyle="round,pad=0.06",
+                           facecolor=color, edgecolor="#90A4AE", lw=0.8, zorder=3)
+        ax.add_patch(b)
+        ax.text(x + w/2, y + h/2 + (0.12 if sublabel else 0),
+                label, ha="center", va="center",
+                fontsize=fontsize, fontweight="bold", zorder=4)
+        if sublabel:
+            ax.text(x + w/2, y + h/2 - 0.17, sublabel,
+                    ha="center", va="center",
+                    fontsize=6.8, color="#546E7A", zorder=4)
+
+    def arrow(x0, x1, y, color=C_ARROW):
+        ax.annotate("", xy=(x1, y), xytext=(x0, y),
+                    arrowprops=dict(arrowstyle="-|>", color=color,
+                                    lw=0.9, mutation_scale=10), zorder=2)
+
+    # ── Post-event stream (top row) ─────────────────────────────────────────
+    post_y = 3.40
+    box(0.10, post_y, 1.05, 0.60, "Post-event", "5×64×64", color=C_BG, fontsize=8)
+    arrow(1.15, 1.30, post_y + 0.30)
+
+    enc_x = [1.30, 2.35, 3.40, 4.45]
+    enc_labels = [
+        ("Block 1", "reg · 64×64"),
+        ("Block 2", "reg · 32×32"),
+        ("Block 3", "reg · 16×16"),
+        ("Block 4", "reg ·  8×8"),
+    ]
+    for bx, (lbl, sub) in zip(enc_x, enc_labels):
+        box(bx, post_y, 0.90, 0.60, lbl, sub, color=C_EQV)
+        if bx < enc_x[-1]:
+            arrow(bx + 0.90, bx + 1.05, post_y + 0.30)
+
+    # ── Pre-event stream (bottom row) ────────────────────────────────────────
+    pre_y = 1.05
+    box(0.10, pre_y, 1.05, 0.60, "Pre-event", "5×64×64", color=C_BG, fontsize=8)
+    arrow(1.15, 1.30, pre_y + 0.30)
+
+    for bx, (lbl, sub) in zip(enc_x, enc_labels):
+        box(bx, pre_y, 0.90, 0.60, lbl, sub, color=C_EQV)
+        if bx < enc_x[-1]:
+            arrow(bx + 0.90, bx + 1.05, pre_y + 0.30)
+
+    # ── Shared-weight annotation (vertical dashed ties between encoder pairs) ─
+    for bx in enc_x:
+        ax.plot([bx + 0.45, bx + 0.45], [pre_y + 0.60, post_y],
+                linestyle=(0, (1.5, 1.5)), color="#7E57C2", lw=0.8, zorder=1)
+    ax.text(sum(enc_x) / 4 + 0.45, (pre_y + post_y) / 2 + 0.30,
+            "weights shared",
+            ha="center", va="center",
+            fontsize=7, color="#4527A0", style="italic",
+            bbox=dict(facecolor="white", edgecolor="none", pad=1.5))
+
+    # ── Difference fusion (centre-right) ─────────────────────────────────────
+    diff_x, diff_y = 5.70, 2.10
+    # Converge arrows from block-4 outputs to the ⊖ node
+    ax.annotate("", xy=(diff_x, diff_y + 0.30), xytext=(enc_x[-1] + 0.90, post_y + 0.30),
+                arrowprops=dict(arrowstyle="-|>", color=C_ARROW,
+                                lw=0.9, mutation_scale=10,
+                                connectionstyle="arc3,rad=-0.15"), zorder=2)
+    ax.annotate("", xy=(diff_x, diff_y + 0.30), xytext=(enc_x[-1] + 0.90, pre_y + 0.30),
+                arrowprops=dict(arrowstyle="-|>", color=C_ARROW,
+                                lw=0.9, mutation_scale=10,
+                                connectionstyle="arc3,rad=0.15"), zorder=2)
+
+    box(diff_x, diff_y, 1.30, 0.60,
+        "feat$_{post}$ − feat$_{pre}$",
+        "D4-equivariant by linearity",
+        color=C_BT, fontsize=8.5)
+
+    # ── Classification head ──────────────────────────────────────────────────
+    head_y = 2.10
+    arrow(diff_x + 1.30, diff_x + 1.45, head_y + 0.30)
+    box(diff_x + 1.45, head_y, 1.25, 0.60, "GroupPool",
+        "trivial rep", color=C_HEAD1)
+    arrow(diff_x + 1.45 + 1.25, diff_x + 1.45 + 1.25 + 0.15, head_y + 0.30)
+    box(diff_x + 1.45 + 1.25 + 0.15, head_y, 1.15, 0.60,
+        "AvgPool\n→ Linear", "sigmoid", color=C_HEAD1)
+    out_x = diff_x + 1.45 + 1.25 + 0.15 + 1.15 + 0.15
+    arrow(out_x - 0.15, out_x, head_y + 0.30)
+    box(out_x, head_y, 1.20, 0.60,
+        "P(debris)", "∈ [0, 1]", color=C_HEAD1)
+
+    ax.text(diff_x + 1.45 + 0.625, head_y + 0.78,
+            "HEAD — Classification",
+            ha="center", fontsize=7.5, color="#1565C0", fontweight="bold")
+
+    # ── Legend / equivariance note ───────────────────────────────────────────
+    ax.text(2.85, post_y + 0.82,
+            "← Equivariant backbone (steerable convolutions) →",
+            ha="center", fontsize=7.5, color="#6A1B9A", style="italic")
+
+    ax.text(diff_x + 0.65, diff_y - 0.35,
+            "Element-wise difference of deepest features;\n"
+            "inherits D4 equivariance from linear group action",
+            ha="center", fontsize=7, color="#880E4F", style="italic")
+
+    # ── Footnote: aux inputs live in the 5-channel stack ─────────────────────
+    ax.text(0.10, 0.28,
+            "Auxiliary terrain inputs (slope, sin/cos aspect) are stacked into the 5-channel "
+            "input (no separate aux encoder).",
+            ha="left", fontsize=7, color="#37474F", style="italic")
+
+    ax.set_title("D4-BT bi-temporal flow: twin equivariant encoder + difference fusion",
+                 fontsize=10, pad=8)
+    fig.tight_layout(pad=0.5)
+    p = out_dir / "fig14_bitemporal_flow.png"
+    fig.savefig(p)
+    plt.close(fig)
+    print(f"  Saved {p}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # FIGURE 7 — Group elements illustration
 # ─────────────────────────────────────────────────────────────────────────────
 def fig7_group_elements(patch_csv: Path, out_dir: Path) -> None:
@@ -1338,7 +1471,7 @@ def main() -> None:
     figs = set(args.figures)
     if "all" in figs:
         figs = {"1", "2", "3", "4", "5", "6", "7", "8",
-                "9", "10", "11", "12", "13"}
+                "9", "10", "11", "12", "13", "14"}
 
     results_dir = Path(args.results_dir)
     scene_dir   = Path(args.scene_dir)
@@ -1397,6 +1530,10 @@ def main() -> None:
     if "13" in figs:
         print("Figure 13: augmentation-accuracy tradeoff…")
         fig13_aug_tradeoff(out_dir)
+
+    if "14" in figs:
+        print("Figure 14: bi-temporal flow schematic…")
+        fig14_bitemporal_flow(out_dir)
 
     print(f"\nAll done. Figures saved to {out_dir}/")
 
